@@ -1,0 +1,21 @@
+{
+  "name": "goalifynow",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev:web": "pnpm --dir apps/webapp start",
+    "build:web": "pnpm --dir apps/webapp build",
+    "dev:mobile:ios": "pnpm --dir mobile run tauri:dev:ios",
+    "dev:mobile:android": "pnpm --dir mobile run tauri:dev:android",
+    "build:mobile:ios": "pnpm --dir mobile run tauri:build:ios:sim",
+    "build:mobile:android": "pnpm --dir mobile run tauri:build:android:debug",
+    "dev:backend": "dotnet run --project backend/GoalifyNow.Api/GoalifyNow.Api.csproj",
+    "build:backend": "dotnet build backend/GoalifyNow.Api/GoalifyNow.Api.csproj",
+    "test:e2e": "pnpm --dir e2e test",
+    "test:e2e:headed": "pnpm --dir e2e exec playwright test --headed",
+    "test:e2e:ui": "pnpm --dir e2e exec playwright test --ui",
+    "test:e2e:smoke": "pnpm --dir e2e exec playwright test tests/specs/smoke.spec.ts",
+    "db:migrate": "dotnet ef database update --project backend/GoalifyNow.Api/GoalifyNow.Api.csproj",
+    "db:migration:add": "dotnet ef migrations add --project backend/GoalifyNow.Api/GoalifyNow.Api.csproj"
+  }
+}

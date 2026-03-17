@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GoalifyNow",
+  "version": "0.1.0",
+  "identifier": "com.goalifynow.mobile",
+  "build": {
+    "beforeDevCommand": "sh -c "lsof -iTCP:4200 -sTCP:LISTEN >/dev/null 2>&1 || pnpm --dir ../apps/webapp start"",
+    "devUrl": "http://localhost:4200",
+    "beforeBuildCommand": "pnpm --dir ../apps/webapp build",
+    "frontendDist": "../apps/webapp/dist/webapp/browser"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "GoalifyNow",
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.goalifynow.com https://localhost:* http://localhost:* ipc: tauri:; img-src 'self' data: blob: https:; font-src 'self' data:; frame-ancestors 'none'; form-action 'self'"
+    }
+  }
+}

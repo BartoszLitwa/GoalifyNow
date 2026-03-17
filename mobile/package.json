@@ -1,0 +1,17 @@
+{
+  "name": "@goalifynow/starter-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev:ios": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PATH=\\\"$PWD/scripts:$PATH\\\" tauri ios dev",
+    "tauri:dev:android": "PATH=\\\"$PWD/scripts:$PATH\\\" \\\"$PWD/scripts/android-reverse-ports\\\" && tauri android dev",
+    "tauri:build:ios:sim": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PATH=\\\"$PWD/scripts:$PATH\\\" tauri ios build --debug --target aarch64-sim --ci",
+    "tauri:build:android:debug": "tauri android build --debug --target aarch64 --ci"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.9.1",
+    "@tauri-apps/cli": "^2.9.6"
+  }
+}

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+adb reverse tcp:4200 tcp:4200 || true
+adb reverse tcp:5090 tcp:5090 || true
