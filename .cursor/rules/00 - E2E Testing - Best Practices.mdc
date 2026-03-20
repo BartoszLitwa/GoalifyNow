@@ -1,0 +1,291 @@
+---
+description: E2E Testing Best Practices and Guidelines for GoalifyNow
+globs:
+  - "e2e/**/*.ts"
+  - "e2e/**/*.spec.ts"
+alwaysApply: false
+---
+
+# GoalifyNow E2E Testing Best Practices
+
+## Overview
+This document provides guidelines for creating and maintaining E2E tests using Playwright for the GoalifyNow application.
+
+## Test Structure
+
+### Directory Organization
+```
+tests/
+├── config/           # Test configuration
+│   ├── test-config.ts
+│   └── playwright.config.ts
+├── fixtures/         # Test data fixtures
+├── pages/            # Page Object Models
+├── specs/            # Test specifications
+│   ├── smoke/        # Critical path tests
+│   ├── properties/   # Property management tests
+│   ├── rentals/      # Rental management tests
+│   ├── tenants/      # Tenant management tests
+│   ├── inventories/  # Inventory tests
+│   ├── floor-plans/  # Floor plan tests
+│   ├── inspections/  # Inspection tests
+│   └── billing/      # Billing tests
+├── setup/            # Test fixtures and setup
+└── utils/            # Helper utilities
+```
+
+### Page Object Model (POM) Pattern
+Always use Page Object Models for interacting with UI elements:
+
+```typescript
+// pages/example-page.ts
+import { Page, Locator, expect } from '@playwright/test';
+import { BasePage } from './base-page';
+import TestConfig from '../config/test-config';
+
+export class ExamplePage extends BasePage {
+  // Use data-testid attributes when available
+  readonly pageTitle = '[data-testid="page-title"]';
+  readonly submitButton = '[data-testid="submit-button"]';
+  
+  // Fallback to text-based selectors
+  readonly createButton = 'button:has-text("Create")';
+  
+  constructor(page: Page) {
+    super(page);
+  }
+
+  async goto(): Promise<void> {
+    await this.page.goto('/example');
+    await this.waitForPageLoad();
+  }
+
+  async verifyPageDisplayed(): Promise<void> {
+    await expect(this.page.locator(this.pageTitle)).toBeVisible();
+  }
+}
+```
+
+## Test Tags and Categorization
+
+### Required Tags
+All tests MUST use appropriate tags for CI/CD categorization:
+
+- `@smoke` - Critical path tests that should run on every deployment
+- `@regression` - Full regression tests for CI pipelines
+- `@prod` - Tests safe to run on production (read-only)
+- `@local` - Tests that create/modify data (local/staging only)
+
+### Feature-Specific Tags
+- `@properties` - Property management tests
+- `@rentals` - Rental management tests
+- `@tenants` - Tenant management tests
+- `@inventories` - Inventory tests
+- `@floorplans` - Floor plan tests
+- `@inspections` - Inspection tests
+- `@billing` - Billing tests
+
+### Example Tag Usage
+```typescript
+test.describe('Feature Page @feature @regression', () => {
+  test.describe('Page Display @smoke @prod', () => {
+    test('should display page correctly', async () => {
+      // Test implementation
+    });
+  });
+
+  test.describe('Data Modification @regression @local', () => {
+    test('should create new item', async () => {
+      // Test implementation
+    });
+  });
+});
+```
+
+## Test Guidelines
+
+### 1. Authentication
+- Use seeded demo users for authentication
+- Login via `LoginPage.login()` method
+- Wait for login completion before proceeding
+
+```typescript
+test.beforeEach(async ({ page, demoUsersAvailable }) => {
+  test.skip(!demoUsersAvailable, 'Demo users not seeded - skipping test');
+  
+  const loginPage = new LoginPage(page);
+  await loginPage.goto();
+  await loginPage.login(
+    TestConfig.credentials.landlord.email,
+    TestConfig.credentials.landlord.password
+  );
+  
+  await page.waitForURL(url => !url.pathname.includes('/auth/login'), { timeout: 30000 });
+});
+```
+
+### 2. Selectors Priority
+1. `data-testid` attributes (most reliable)
+2. ARIA labels and roles
+3. Text-based selectors
+4. CSS class selectors (least preferred)
+
+### 3. Wait Strategies
+- Use `waitForSelector` instead of arbitrary timeouts
+- Use `Promise.race` for multiple possible outcomes
+- Use `waitForURL` for navigation completion
+
+```typescript
+// Good: Wait for specific conditions
+await Promise.race([
+  this.page.waitForSelector('[data-testid="data-table"]', { state: 'visible' }),
+  this.page.waitForSelector('[data-testid="empty-state"]', { state: 'visible' })
+]);
+
+// Avoid: Arbitrary timeouts
+await page.waitForTimeout(5000);  // Don't do this
+```
+
+### 4. Test Data Management
+- Use seeded E2E test users
+- Clean up test data after modifications
+- Don't rely on specific data existing unless it's seeded
+
+### 5. Responsive Testing
+- Test on multiple viewports
+- Navigate first, then resize (to avoid losing session)
+
+```typescript
+test('should display correctly on mobile', async ({ page }) => {
+  await examplePage.goto();  // Navigate first
+  await examplePage.waitForLoad();
+  
+  await page.setViewportSize({ width: 375, height: 667 });  // Then resize
+  await page.waitForTimeout(500);  // Allow reflow
+  
+  await expect(page.locator('[data-testid="title"]')).toBeVisible();
+});
+```
+
+### 6. Error Handling
+- Use `.catch(() => {})` for optional waits
+- Handle rate limiting gracefully
+- Skip tests when prerequisites aren't met
+
+## Running Tests
+
+### Local Development
+```bash
+# Run all tests
+npx playwright test
+
+# Run smoke tests only
+npx playwright test --grep "@smoke"
+
+# Run specific feature tests
+npx playwright test tests/specs/properties/
+
+# Run with UI mode for debugging
+npx playwright test --ui
+```
+
+### CI/CD
+```bash
+# Smoke tests for quick validation
+npx playwright test --grep "@smoke" --project=chromium
+
+# Full regression suite
+npx playwright test --grep "@regression" --project=chromium
+
+# Production-safe tests
+npx playwright test --grep "@prod" --project=chromium
+```
+
+## Common Patterns
+
+### Conditional Test Execution
+```typescript
+test('should perform action', async () => {
+  const count = await examplePage.getItemCount();
+  if (count > 0) {
+    // Proceed with test
+  }
+  // Test passes even if no items (not a failure condition)
+});
+```
+
+### Dialog/Modal Handling
+```typescript
+async clickDeleteItem(): Promise<void> {
+  await this.page.locator(this.deleteButton).click();
+  await this.page.waitForSelector('.p-dialog, .p-confirmdialog', { 
+    state: 'visible', 
+    timeout: 5000 
+  }).catch(() => {});
+}
+
+async confirmDelete(): Promise<void> {
+  const confirmBtn = this.page.locator(
+    '.p-dialog button:has-text("Yes"), button:has-text("Confirm")'
+  ).first();
+  await confirmBtn.click();
+}
+```
+
+### Performance Testing
+```typescript
+test('should load within acceptable time', async () => {
+  const startTime = Date.now();
+  await examplePage.goto();
+  await examplePage.waitForLoad();
+  const loadTime = Date.now() - startTime;
+  expect(loadTime).toBeLessThan(10000);  // 10 seconds max
+});
+```
+
+## Troubleshooting
+
+### Rate Limiting
+The Auth API has rate limiting. If tests fail with 429 errors:
+1. Add delays between test runs
+2. Use `--workers=1` for sequential execution
+3. Check `checkDemoUserAvailable` in test fixtures
+
+### Session Issues
+If authentication fails intermittently:
+1. Ensure login completes before navigation
+2. Check for localStorage/cookie persistence
+3. Verify demo users are seeded in database
+
+### Selector Not Found
+1. Verify the element exists in DOM (inspect in browser)
+2. Check for dynamic loading (add wait)
+3. Verify data-testid matches current UI
+4. Use multiple selector fallbacks
+
+## Adding New Tests
+
+### Checklist
+1. [ ] Create Page Object Model in `tests/pages/`
+2. [ ] Create test spec in appropriate `tests/specs/` subdirectory
+3. [ ] Add appropriate tags (@smoke, @regression, @prod/@local)
+4. [ ] Include page display tests
+5. [ ] Include functionality tests
+6. [ ] Include responsive tests
+7. [ ] Include performance test
+8. [ ] Test locally before committing
+9. [ ] Update this documentation if needed
+
+## Maintenance
+
+### When UI Changes
+1. Update affected Page Object Models
+2. Update selectors to match new structure
+3. Run affected tests to verify
+4. Update this documentation if patterns change
+
+### When Adding New Features
+1. Add data-testid attributes to new UI elements
+2. Create new Page Object Model
+3. Create comprehensive test suite
+4. Add appropriate tags for CI/CD

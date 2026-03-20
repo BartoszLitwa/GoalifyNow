@@ -1,0 +1,305 @@
+---
+description: Integration patterns between GoalifyNow backend APIs and Angular frontend
+globs:
+  - "apps/webapp/src/services/**"
+  - "apps/webapp/src/app/services/**"
+  - "backend/**"
+alwaysApply: false
+---
+
+# Backend-Frontend Integration Patterns
+
+## API Communication
+
+### Environment Configuration
+```typescript
+// apps/webapp/src/environments/environment.ts
+export const environment = {
+  production: false,
+  apiUrls: {
+    auth: 'https://localhost:10000',
+    documents: 'https://localhost:10001',
+    payments: 'https://localhost:10002',
+    rentals: 'https://localhost:10003',
+    search: 'https://localhost:10005'
+  }
+};
+```
+
+### HTTP Service Pattern
+```typescript
+@Injectable({ providedIn: 'root' })
+export class RentalsService {
+  private readonly http = inject(HttpClient);
+  private readonly apiUrl = `${environment.apiUrls.rentals}/api/v1/rentals`;
+  
+  // GET request
+  getMyRentals(): Observable<Property[]> {
+    return this.http.get<Property[]>(`${this.apiUrl}/my-rentals`).pipe(
+      catchError(this.handleError)
+    );
+  }
+  
+  // POST with body
+  createProperty(dto: CreatePropertyDto): Observable<Property> {
+    return this.http.post<Property>(`${this.apiUrl}/properties`, dto);
+  }
+  
+  // File upload
+  uploadImage(propertyId: string, file: File): Observable<PropertyImage> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post<PropertyImage>(
+      `${this.apiUrl}/properties/${propertyId}/images`,
+      formData
+    );
+  }
+  
+  private handleError(error: HttpErrorResponse): Observable<never> {
+    console.error('API Error:', error);
+    return throwError(() => new Error(error.error?.message || 'API request failed'));
+  }
+}
+```
+
+## Authentication Flow
+
+### Login/Register Flow
+```
+1. User submits credentials
+2. Frontend calls POST /api/auth/login
+3. Backend validates credentials
+4. Backend returns { accessToken, refreshToken }
+5. Frontend stores tokens in localStorage
+6. Frontend decodes JWT and updates user state
+7. Frontend redirects to dashboard
+8. All subsequent requests include Bearer token
+```
+
+### Token Refresh
+```typescript
+@Injectable()
+export class TokenRefreshInterceptor implements HttpInterceptor {
+  intercept(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
+    return next.handle(req).pipe(
+      catchError(error => {
+        if (error.status === 401) {
+          return this.handle401Error(req, next);
+        }
+        return throwError(() => error);
+      })
+    );
+  }
+  
+  private handle401Error(req: HttpRequest<any>, next: HttpHandler) {
+    // Attempt token refresh
+    return this.authService.refreshToken().pipe(
+      switchMap(token => {
+        const cloned = req.clone({
+          setHeaders: { Authorization: `Bearer ${token.accessToken}` }
+        });
+        return next.handle(cloned);
+      }),
+      catchError(err => {
+        this.authService.logout();
+        return throwError(() => err);
+      })
+    );
+  }
+}
+```
+
+## Data Models Consistency
+
+### Backend DTO
+```csharp
+public record PropertyDto
+{
+    public Guid Id { get; init; }
+    public string Address { get; init; } = string.Empty;
+    public decimal MonthlyRent { get; init; }
+    public PropertyType Type { get; init; }
+    public List<PropertyImageDto> Images { get; init; } = [];
+}
+```
+
+### Frontend Interface
+```typescript
+export interface PropertyDto {
+  id: string;  // Guid as string
+  address: string;
+  monthlyRent: number;
+  type: PropertyType;
+  images: PropertyImageDto[];
+}
+
+export enum PropertyType {
+  House = 1,
+  Apartment = 2,
+  Condo = 3
+}
+```
+
+## Real-Time Communication (SignalR)
+
+### Backend Hub
+```csharp
+public class NotificationHub : Hub
+{
+    public async Task SendNotification(string userId, string message)
+    {
+        await Clients.User(userId).SendAsync("ReceiveNotification", message);
+    }
+}
+```
+
+### Frontend Connection
+```typescript
+@Injectable({ providedIn: 'root' })
+export class SignalRService {
+  private hubConnection: signalR.HubConnection;
+  
+  startConnection(): Promise<void> {
+    this.hubConnection = new signalR.HubConnectionBuilder()
+      .withUrl(`${environment.apiUrls.notifications}/notificationHub`, {
+        accessTokenFactory: () => this.authService.getAccessToken()!
+      })
+      .build();
+    
+    this.hubConnection.on('ReceiveNotification', (message: string) => {
+      this.notificationReceived$.next(message);
+    });
+    
+    return this.hubConnection.start();
+  }
+}
+```
+
+## Error Handling
+
+### Backend Error Response
+```csharp
+return Problem(
+    detail: "Property not found",
+    statusCode: StatusCodes.Status404NotFound
+);
+```
+
+### Frontend Error Handling
+```typescript
+this.rentalsService.getProperty(id).pipe(
+  catchError((error: HttpErrorResponse) => {
+    if (error.status === 404) {
+      this.messageService.add({
+        severity: 'error',
+        summary: 'Not Found',
+        detail: error.error.detail
+      });
+    }
+    return EMPTY;
+  })
+).subscribe();
+```
+
+## File Upload/Download
+
+### Upload to Backend
+```typescript
+uploadImage(file: File): Observable<string> {
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+  
+  return this.http.post<{url: string}>(
+    `${this.apiUrl}/upload`,
+    formData,
+    {
+      reportProgress: true,
+      observe: 'events'
+    }
+  ).pipe(
+    filter(event => event.type === HttpEventType.Response),
+    map(event => (event as HttpResponse<{url: string}>).body!.url)
+  );
+}
+```
+
+### Download from Backend
+```typescript
+downloadDocument(id: string): Observable<Blob> {
+  return this.http.get(`${this.apiUrl}/documents/${id}/download`, {
+    responseType: 'blob'
+  });
+}
+
+// Save file
+saveDocument(blob: Blob, filename: string): void {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+```
+
+## Pagination
+
+### Backend Pagination
+```csharp
+[HttpGet]
+public async Task<ActionResult<PagedResult<PropertyDto>>> GetProperties(
+    [FromQuery] int pageIndex = 0,
+    [FromQuery] int pageSize = 10)
+{
+    var query = db.Properties
+        .Where(p => p.TenantId == currentContext.TenantId)
+        .OrderBy(p => p.CreatedAt);
+    
+    var total = await query.CountAsync();
+    var items = await query
+        .Skip(pageIndex * pageSize)
+        .Take(pageSize)
+        .ToListAsync();
+    
+    return Ok(new PagedResult<PropertyDto>
+    {
+        Items = items.Select(p => p.ToDto()).ToList(),
+        TotalCount = total,
+        PageIndex = pageIndex,
+        PageSize = pageSize
+    });
+}
+```
+
+### Frontend Pagination
+```typescript
+interface PagedResult<T> {
+  items: T[];
+  totalCount: number;
+  pageIndex: number;
+  pageSize: number;
+}
+
+loadProperties(pageIndex: number, pageSize: number): Observable<PagedResult<Property>> {
+  const params = new HttpParams()
+    .set('pageIndex', pageIndex.toString())
+    .set('pageSize', pageSize.toString());
+  
+  return this.http.get<PagedResult<Property>>(`${this.apiUrl}/properties`, { params });
+}
+```
+
+## Best Practices
+
+1. **Consistent DTOs:** Backend and frontend models must match
+2. **Error Handling:** Handle all HTTP error statuses gracefully
+3. **Loading States:** Show loading indicators during API calls
+4. **Token Management:** Automatically refresh expired tokens
+5. **Type Safety:** Use TypeScript interfaces for all API responses
+6. **Environment Config:** Never hardcode API URLs
+7. **CORS:** Backend must allow frontend origin
+8. **Date Handling:** Backend uses ISO 8601, frontend uses Date objects
+9. **Enums:** Backend and frontend enum values must align
+10. **File Uploads:** Use FormData for multipart/form-data
+
+**See security rules for authentication best practices.**

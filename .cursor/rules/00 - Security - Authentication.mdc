@@ -1,0 +1,288 @@
+---
+description: Security patterns for authentication and authorization in GoalifyNow
+globs:
+  - "backend/**"
+  - "apps/webapp/src/app/services/auth*.ts"
+  - "apps/webapp/src/app/guards/**"
+  - "apps/webapp/src/services/core/auth/**"
+alwaysApply: false
+---
+
+# Authentication & Authorization Security
+
+## JWT Security
+
+### Backend JWT Configuration
+```csharp
+// Strong secret key (min 32 characters)
+services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = configuration["Jwt:Issuer"],
+            ValidAudience = configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(configuration["Jwt:Key"]!)),
+            ClockSkew = TimeSpan.Zero  // No clock skew tolerance
+        };
+    });
+```
+
+### Token Expiration
+- **Access Token:** 60 minutes (short-lived)
+- **Refresh Token:** 30 days (long-lived, one-time use)
+
+### Refresh Token Security
+```csharp
+public class RefreshToken : Entity
+{
+    public string TokenHash { get; set; }  // Store HASH, not plain text
+    public DateTime ExpiresAt { get; set; }
+    public bool IsRevoked { get; set; }
+    public bool IsUsed { get; set; }  // One-time use
+}
+
+// Generate refresh token
+var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+var hash = BCrypt.HashPassword(token);  // Store hash
+
+// Validate refresh token
+if (!BCrypt.Verify(providedToken, storedHash))
+    return Unauthorized();
+
+if (refreshToken.IsUsed || refreshToken.IsRevoked)
+    return Unauthorized();
+
+refreshToken.IsUsed = true;  // Mark as used
+```
+
+## Password Security
+
+### Password Hashing (BCrypt)
+```csharp
+public class UserPasswordService : IPasswordHasher
+{
+    private readonly PasswordHashingOptions _options;
+    
+    public string HashPassword(string password)
+    {
+        // BCrypt with work factor 12 (2^12 = 4096 rounds)
+        return BCrypt.Net.BCrypt.HashPassword(
+            password,
+            workFactor: _options.WorkFactor,  // 12
+            enhancedEntropy: true
+        );
+    }
+    
+    public bool VerifyPassword(string password, string hash)
+    {
+        return BCrypt.Net.BCrypt.Verify(password, hash);
+    }
+}
+```
+
+### Password Requirements
+- Minimum 8 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one digit
+- At least one special character
+
+## Rate Limiting
+
+### Critical Endpoints
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    // Login - 5 attempts per minute per IP
+    options.AddFixedWindowLimiter("login-limit", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 5;
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+    });
+    
+    // Register - 3 per hour per IP
+    options.AddFixedWindowLimiter("register-limit", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 3;
+        limiterOptions.Window = TimeSpan.FromHours(1);
+    });
+    
+    // Password reset - 3 per 15 minutes per IP
+    options.AddFixedWindowLimiter("password-limit", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 3;
+        limiterOptions.Window = TimeSpan.FromMinutes(15);
+    });
+});
+
+[EnableRateLimiting("login-limit")]
+[HttpPost("login")]
+public async Task<IActionResult> Login([FromBody] LoginRequestDto dto) { ... }
+```
+
+## CORS Security
+
+### Strict CORS Configuration
+```csharp
+services.AddCors(options =>
+{
+    options.AddPolicy("AllowAngular", policy =>
+    {
+        policy.WithOrigins(
+            "http://localhost:4200",  // Development
+            "https://rentifynow.com"  // Production
+        )
+        .AllowCredentials()
+        .AllowAnyMethod()
+        .AllowAnyHeader();
+    });
+});
+
+// Apply CORS policy
+app.UseCors("AllowAngular");
+```
+
+### Security Headers
+```csharp
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    ctx.Response.Headers.Append("X-Frame-Options", "DENY");
+    ctx.Response.Headers.Append("X-XSS-Protection", "0");
+    ctx.Response.Headers.Append("Referrer-Policy", "no-referrer");
+    ctx.Response.Headers.Append("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+    ctx.Response.Headers.Append("Content-Security-Policy",
+        "default-src 'self'; frame-ancestors 'none';");
+    await next();
+});
+```
+
+## Frontend Token Storage
+
+### Secure Storage
+```typescript
+// Store tokens in localStorage (acceptable for SPAs)
+// HttpOnly cookies would be more secure but complicate architecture
+localStorage.setItem('authToken', accessToken);
+localStorage.setItem('refreshToken', refreshToken);
+
+// Clear tokens on logout
+logout(): void {
+  localStorage.removeItem('authToken');
+  localStorage.removeItem('refreshToken');
+  this.currentUserSubject.next(null);
+  this.router.navigate(['/auth/login']);
+}
+```
+
+### Token Validation
+```typescript
+isTokenExpired(token: string): boolean {
+  try {
+    const decoded = jwtDecode<{exp: number}>(token);
+    return Date.now() >= decoded.exp * 1000;
+  } catch {
+    return true;
+  }
+}
+```
+
+## Authorization Patterns
+
+### Role-Based Access Control (RBAC)
+```csharp
+[Authorize(Roles = "PropertyManager")]
+[HttpPost("properties")]
+public async Task<IActionResult> CreateProperty([FromBody] CreatePropertyDto dto) { ... }
+```
+
+### Permission-Based Authorization
+```csharp
+public class ActiveSubscriptionHandler : AuthorizationHandler<ActiveSubscriptionRequirement>
+{
+    protected override async Task HandleRequirementAsync(
+        AuthorizationHandlerContext context,
+        ActiveSubscriptionRequirement requirement)
+    {
+        var userId = Guid.Parse(context.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var hasActiveSubscription = await subscriptionService.HasActiveSubscriptionAsync(userId);
+        
+        if (hasActiveSubscription)
+            context.Succeed(requirement);
+    }
+}
+
+[Authorize(Policy = "ActiveSubscriber")]
+[HttpGet("premium-features")]
+public IActionResult GetPremiumFeatures() { ... }
+```
+
+### Frontend Guards
+```typescript
+export const roleGuard = (allowedRoles: string[]): CanActivateFn => {
+  return (route, state) => {
+    const authService = inject(AuthService);
+    const router = inject(Router);
+    
+    const userRoles = authService.getCurrentUser()?.roles || [];
+    const hasRole = allowedRoles.some(role => userRoles.includes(role));
+    
+    if (hasRole) return true;
+    
+    router.navigate(['/unauthorized']);
+    return false;
+  };
+};
+
+// Usage in routes
+{
+  path: 'admin',
+  canActivate: [roleGuard(['Admin'])],
+  loadComponent: () => import('./admin/admin.component')
+}
+```
+
+## External Auth Security
+
+### Google OAuth Validation
+```csharp
+public async Task<GoogleJsonWebSignature.Payload?> ValidateGoogleTokenAsync(string idToken)
+{
+    try
+    {
+        var settings = new GoogleJsonWebSignature.ValidationSettings
+        {
+            Audience = new[] { _options.Google.ClientId }
+        };
+        
+        return await GoogleJsonWebSignature.ValidateAsync(idToken, settings);
+    }
+    catch (InvalidJwtException)
+    {
+        return null;
+    }
+}
+```
+
+## Security Best Practices
+
+1. **Never Store Secrets in Code:** Use Azure Key Vault
+2. **Strong JWT Keys:** Minimum 32 characters, random
+3. **Short Token Lifetimes:** Access tokens expire quickly
+4. **One-Time Refresh Tokens:** Mark as used after refresh
+5. **Rate Limiting:** Prevent brute force attacks
+6. **HTTPS Only:** All production traffic over HTTPS
+7. **CORS Restrictions:** Only allow trusted origins
+8. **Security Headers:** Implement all security headers
+9. **Password Hashing:** BCrypt with high work factor
+10. **Input Validation:** Validate all user input
+11. **Audit Logging:** Log all authentication attempts
+12. **Token Revocation:** Support manual token revocation
+
+**See backend architecture rules for gRPC auth patterns.**

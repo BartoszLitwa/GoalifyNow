@@ -1,0 +1,322 @@
+---
+description: End-to-end testing rules and structure for GoalifyNow Playwright tests
+globs:
+  - "e2e/**"
+alwaysApply: false
+---
+
+# GoalifyNow E2E Testing Rules
+
+## Overview
+End-to-end testing rules for the GoalifyNow application using Playwright with TypeScript.
+
+---
+
+## Test Structure & Organization
+
+### Directory Structure
+```
+tests/
+├── config/               # Test configuration and environment files
+│   ├── environments/     # Environment-specific configs (local, staging, production)
+│   └── test-config.ts    # Centralized configuration
+├── fixtures/             # Test data and fixtures
+├── helpers/              # Utility functions for tests
+├── pages/                # Page Object Model (POM) classes
+├── setup/                # Global setup and fixtures
+│   ├── global-setup.ts   # Runs before all tests
+│   ├── global-teardown.ts# Runs after all tests
+│   └── test-fixtures.ts  # Custom Playwright fixtures
+├── specs/                # Test specifications organized by feature
+│   ├── smoke/            # Critical path tests (@smoke)
+│   ├── auth/             # Authentication tests
+│   ├── properties/       # Property management tests
+│   ├── finances/         # Financial tests
+│   ├── documents/        # Document management tests
+│   └── ...               # Other feature tests
+└── utils/                # Shared utilities
+    ├── auth-helper.ts    # Authentication helpers
+    ├── api-helper.ts     # API testing utilities
+    └── test-data-manager.ts # Test data lifecycle management
+```
+
+### Test Tagging Strategy
+**ALWAYS** tag tests appropriately for selective execution:
+
+| Tag | Purpose | When to Run |
+|-----|---------|-------------|
+| `@smoke` | Critical path tests | Every deployment, PR |
+| `@critical` | Must-pass tests | Before any release |
+| `@regression` | Full test coverage | Nightly/weekly |
+| `@prod` | Safe for production | Can run in prod env |
+| `@api` | API-only tests | CI pipelines |
+| `@e2e` | Full user journey | Integration testing |
+
+```typescript
+// Example with multiple tags
+test('Critical login flow @smoke @critical @prod', async ({ page }) => {
+  // Test implementation
+});
+```
+
+---
+
+## Page Object Model (POM) Pattern
+
+### Creating Page Objects
+**ALWAYS** extend `BasePage` for consistent functionality:
+
+```typescript
+import { Page } from '@playwright/test';
+import { BasePage } from './base-page';
+import TestConfig from '../config/test-config';
+
+export class MyFeaturePage extends BasePage {
+  // Use data-testid selectors - they're stable and purpose-built
+  private readonly submitButton = '[data-testid="submit-button"]';
+  private readonly errorMessage = '[data-testid="error-message"]';
+  
+  constructor(page: Page) {
+    super(page);
+  }
+
+  async goto(): Promise<void> {
+    await this.page.goto('/my-feature');
+    await this.waitForPageLoad();
+  }
+
+  async submitForm(): Promise<void> {
+    await this.clickElement(this.submitButton);
+    await this.waitForLoadingComplete();
+  }
+}
+```
+
+### Selector Priority
+1. **`data-testid`** attributes (preferred - stable and purpose-built)
+2. **Semantic HTML** (`button`, `input`, `a`)
+3. **ARIA attributes** (`role`, `aria-label`)
+4. **Text content** (for user-facing labels)
+5. **CSS classes** (avoid - fragile)
+
+---
+
+## Test Data Management
+
+### Using Dedicated E2E Users
+E2E tests MUST use dedicated E2E users seeded for SeedPackType.E2E:
+
+```typescript
+import TestConfig from '../config/test-config';
+
+const landlordUser = TestConfig.credentials.landlord;
+const tenantUser = TestConfig.credentials.tenant;
+const adminUser = TestConfig.credentials.admin;
+```
+
+Defaults: `e2e-landlord@demo.com`, `e2e-tenant@demo.com`, `e2e-admin@demo.com` (password: `Test123!`).
+
+**Strict guard:** Config fails fast if `TEST_*_EMAIL` env vars use legacy aliases (`landlord1@demo.com`, `tenant1@demo.com`, `admin@rentifynow.com`, etc.) unless `E2E_ALLOW_LEGACY_DEMO_USERS=true`.
+
+### Test Data Lifecycle (AAA Pattern)
+```typescript
+test('should create and delete test data', async ({ page, testDataManager }) => {
+  // ARRANGE - Create test data
+  const testProperty = await testDataManager.createTestProperty(authenticatedUser.token, {
+    title: `E2E Test Property ${Date.now()}`
+  });
+  
+  // ACT - Perform test actions
+  await page.goto(`/properties/${testProperty.id}`);
+  
+  // ASSERT - Verify results
+  await expect(page.locator('h1')).toContainText(testProperty.name);
+  
+  // CLEANUP - Automatic via testDataManager fixture
+});
+```
+
+---
+
+## Authentication Patterns
+
+### Using Test Fixtures
+```typescript
+// Import from custom fixtures
+import { test, expect } from '../../setup/test-fixtures';
+
+test.describe('Authenticated Feature', () => {
+  test('should access dashboard @smoke', async ({ page, demoUsersAvailable }) => {
+    // Skip if demo users not seeded
+    test.skip(!demoUsersAvailable, 'Demo users not seeded');
+    
+    // Test with authenticated session from fixture
+    await page.goto('/dashboard');
+  });
+});
+```
+
+### Manual Login When Needed
+```typescript
+import { AuthHelper } from '../utils/auth-helper';
+
+test('specific auth test', async ({ page }) => {
+  const authHelper = new AuthHelper(page);
+  
+  // Login via API (faster, handles rate limiting)
+  await authHelper.loginViaAPI({
+    email: TestConfig.credentials.landlord.email,
+    password: TestConfig.credentials.landlord.password
+  });
+});
+```
+
+---
+
+## Best Practices
+
+### DO ✅
+- Use `data-testid` attributes for element selection
+- Wait for network idle before assertions
+- Handle rate limiting with retry logic
+- Use meaningful test names that describe the scenario
+- Group related tests with `test.describe()`
+- Tag tests appropriately for CI/CD filtering
+- Clean up test data after tests
+- Handle cookie consent banners
+- Use `force: true` for clicks blocked by overlays (sparingly)
+
+### DON'T ❌
+- Hard-code timeouts (use `TestConfig.timeouts`)
+- Use CSS selectors that depend on styling
+- Create tests that depend on other tests' state
+- Skip error handling in page objects
+- Use `test.only` in committed code
+- Rely on fixed delays (`page.waitForTimeout`)
+- Create duplicate user accounts in tests
+
+---
+
+## Handling Common UI Elements
+
+### Cookie Consent Banner
+```typescript
+// Dismiss cookie consent if present
+const acceptBtn = page.locator('app-cookie-consent button')
+  .filter({ hasText: /Accept|Zaakceptuj/i }).first();
+if (await acceptBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+  await acceptBtn.click();
+  await page.waitForTimeout(500);
+}
+```
+
+### PrimeNG Components
+```typescript
+// p-menu popup
+const userProfile = page.locator('[data-testid="user-profile-button"]');
+await userProfile.click({ force: true }); // Force click bypasses overlays
+
+// Wait for popup menu
+const menu = page.locator('body > p-menu .p-menu');
+await menu.waitFor({ state: 'visible' });
+
+// Click menu item
+const menuItem = page.locator('.p-menuitem-link')
+  .filter({ has: page.locator('.pi-sign-out') });
+await menuItem.click();
+```
+
+### Loading States
+```typescript
+// Wait for loading spinner to disappear
+await page.locator('[data-testid="loading-spinner"]')
+  .waitFor({ state: 'hidden', timeout: 30000 });
+
+// Or use page object method
+await myPage.waitForLoadingComplete();
+```
+
+---
+
+## Running Tests
+
+### Local Development
+```bash
+# Run all smoke tests
+npx playwright test --grep "@smoke"
+
+# Run specific feature tests
+npx playwright test tests/specs/properties/
+
+# Run in headed mode for debugging
+npx playwright test --headed --grep "@smoke"
+
+# Run with UI mode
+npx playwright test --ui
+
+# Generate HTML report
+npx playwright test --reporter=html
+npx playwright show-report
+```
+
+### Environment Configuration
+```bash
+# Discover Aspire ports
+bash tests/config/discover-ports.sh > tests/.env
+
+# Run against staging
+TEST_ENV=staging npx playwright test --grep "@prod"
+
+# Skip health checks
+REQUIRE_SERVICES_HEALTHY=false npx playwright test
+```
+
+---
+
+## CI/CD Integration
+
+### Tags for Pipelines
+- **PR checks**: Run `@smoke` tests
+- **Staging deploy**: Run `@smoke @critical` tests
+- **Production deploy**: Run `@prod` tests
+- **Nightly regression**: Run `@regression` tests
+
+### GitHub Actions Example
+```yaml
+- name: Run E2E Smoke Tests
+  run: npx playwright test --grep "@smoke" --project=chromium
+  
+- name: Upload Test Results
+  if: always()
+  uses: actions/upload-artifact@v3
+  with:
+    name: playwright-report
+    path: playwright-report/
+```
+
+---
+
+## Troubleshooting
+
+### Rate Limiting
+The auth service has rate limiting. Tests handle this automatically with retry logic, but if you see `429` errors:
+1. Wait 60 seconds for rate limit to reset
+2. Use `E2E_DISABLE_AUTO_LOGIN=true` to skip pre-auth
+3. Run fewer parallel workers
+
+### Element Not Found
+1. Check if element has `data-testid`
+2. Verify the page is fully loaded (`waitForLoadState('networkidle')`)
+3. Check for overlays (cookie consent, modals)
+4. Use browser inspector to find correct selectors
+
+### Test Flakiness
+1. Add explicit waits for dynamic content
+2. Check for race conditions in page load
+3. Verify element is in viewport before clicking
+4. Use `{ force: true }` for click-intercepted elements
+
+---
+
+**Last Updated:** 2026-01-23
+**Applies To:** `tests/**/*.ts`, `tests/**/*.spec.ts`

@@ -1,0 +1,25 @@
+---
+description: Template for re-diagnosis when a previous attempt failed (manual use)
+alwaysApply: false
+---
+User Query: {replace this with a specific and concise description of the problem you are still facing}
+
+---
+
+Based on the persistent user query detailed above the `---` separator, a previous attempt likely failed to resolve the issue. **Discard previous assumptions about the root cause.** We must now perform a **systematic re-diagnosis** by following these steps, adhering strictly to your core operating principles (`01 - core.mdc` / `.cursor/rules/` / User Rules):
+
+1.  **Step Back & Re-Scope:** Forget the specifics of the last failed attempt. Broaden your focus. Identify the *core functionality* or *system component(s)* involved in the user's reported problem.
+2.  **Map the Relevant System Structure:** Use tools to map out the high-level structure and key interaction points of the identified component(s). Understand how data flows, where configurations are loaded, and what dependencies exist.
+3.  **Hypothesize Potential Root Causes (Broadly):** Based on the system map and the problem description, generate a broad list of potential areas where the root cause might lie.
+4.  **Systematic Investigation & Evidence Gathering:** Prioritize and investigate the most likely hypotheses using targeted tool usage.
+    *   Validate configurations by reading relevant config files.
+    *   Trace execution flow to the failing functionality.
+    *   Check dependencies and external interactions.
+    *   Examine logs when available.
+5.  **Identify the Confirmed Root Cause:** Based only on the evidence gathered through investigation, pinpoint the specific root cause. If inconclusive, report findings and suggest the next most logical diagnostic step.
+6.  **Propose a Targeted Solution:** Once the root cause is confirmed, propose a precise fix and explain why it addresses the root cause.
+7.  **Plan Comprehensive Verification:** Outline how you will verify that the fix resolves the issue and avoids regressions.
+8.  **Execute & Verify:** Implement the fix and execute the verification plan.
+9.  **Report Outcome:** Succinctly report the root cause, the fix, and verification results.
+
+Proceed methodically through these diagnostic steps. Do not jump to proposing a fix until the root cause is confidently identified through investigation.

@@ -1,0 +1,20 @@
+---
+description: GoalifyNow .NET API backend
+globs:
+  - "backend/**"
+alwaysApply: false
+---
+
+# GoalifyNow.Api
+
+## Scope
+
+`backend/GoalifyNow.Api` — ASP.NET Core / FastEndpoints API (.NET 10), EF Core, migrations via root `pnpm` scripts.
+
+## Practices
+
+- Follow FastEndpoints patterns already present: endpoints, validators, and OpenAPI metadata via `Summary()` and `[Description]` where the project uses them
+- Prefer clear request/response records per endpoint to avoid validator discovery collisions
+- Keep EF Core queries filterable in the database; avoid client-side filtering of large sets
+- Use Shouldly in tests if test projects exist; do not introduce FluentAssertions
+- After schema changes, use `pnpm db:migration:add` / `pnpm db:migrate` as appropriate, then verify builds

@@ -1,0 +1,736 @@
+---
+description: Testing patterns and conventions for GoalifyNow backend services including unit, integration, and architecture tests
+globs:
+  - "backend/**"
+  - "e2e/**"
+  - "**/*Tests.cs"
+  - "**/*Test.cs"
+alwaysApply: false
+---
+
+# GoalifyNow Backend Testing Guide
+
+## Overview
+GoalifyNow uses xUnit for testing with Shouldly for assertions, Moq for mocking, Test containers for integration tests, and NetArchTest for architecture tests.
+
+---
+
+## Testing Stack
+
+### Core Testing Libraries
+- **xUnit 2.9.3** - Test framework
+- **Shouldly 4.3.0** - Fluent assertions (FREE, MIT-licensed)
+- **Moq 4.20.72** - Mocking framework
+- **FluentValidation.TestHelper 11.9.0** - Validator testing
+- **Microsoft.AspNetCore.Mvc.Testing 9.0.9** - API integration testing
+- **Testcontainers 4.7.0** - Container-based integration tests
+  - Testcontainers.MsSql
+  - Testcontainers.Azurite
+  - Testcontainers.Redis
+- **Respawn 6.2.1** - Database cleanup between tests
+- **NetArchTest.Rules 1.3.2** - Architecture validation
+
+### ⚠️ CRITICAL: Assertion Library Policy
+
+**ALWAYS use Shouldly for assertions. FluentAssertions is FORBIDDEN.**
+
+- ✅ **Shouldly** - Free, open-source, MIT-licensed for commercial use
+- ❌ **FluentAssertions** - FORBIDDEN (requires commercial license)
+
+**Why Shouldly:**
+- Completely free for commercial use
+- Clean, readable syntax with excellent error messages
+- Smaller footprint and better performance
+- Active maintenance and community support
+- No licensing concerns
+
+**If you encounter FluentAssertions in code:**
+1. Remove it immediately
+2. Replace with Shouldly equivalents (see examples below)
+3. Remove from .csproj files
+4. Report in code review
+
+---
+
+## Test Project Structure
+
+```
+tests/
+├── GoalifyNow.Auth/
+│   ├── GoalifyNow.Auth.UnitTests/          # Unit tests
+│   │   ├── Application/
+│   │   │   ├── Users/UserServiceTests.cs
+│   │   │   └── Roles/RoleServiceTests.cs
+│   │   └── Domain/
+│   │       └── Entities/UserTests.cs
+│   └── GoalifyNow.Auth.IntegrationTests/   # Integration tests
+│       ├── API/
+│       │   └── AuthEndpointTests.cs
+│       └── Infrastructure/
+│           └── Persistence/AuthDbContextTests.cs
+├── GoalifyNow.Rentals/
+│   ├── GoalifyNow.Rentals.UnitTests/
+│   └── GoalifyNow.Rentals.IntegrationTests/
+├── GoalifyNow.Common/
+│   └── GoalifyNow.Common.UnitTests/
+├── GoalifyNow.ArchitectureTests/           # Architecture rules
+└── GoalifyNow.AppHost.Tests/               # Aspire integration tests
+```
+
+---
+
+## Unit Testing
+
+### Test Base Class Pattern
+```csharp
+using Shouldly;
+using Xunit;
+
+namespace GoalifyNow.Auth.UnitTests.Common;
+
+public abstract class TestBase
+{
+    // Shared test setup/utilities
+}
+```
+
+### Service Unit Test Example
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using GoalifyNow.Auth.Application.Features.Users.Services;
+using GoalifyNow.Auth.Domain.Entities;
+using GoalifyNow.Auth.Infrastructure.Persistence;
+using GoalifyNow.Auth.UnitTests.Common;
+using GoalifyNow.Common.Infrastructure.Context;
+
+namespace GoalifyNow.Auth.UnitTests.Application.Users;
+
+public class UserServiceTests : TestBase
+{
+    private (AuthDbContext db, ICurrentContextService ctx) CreateContext()
+    {
+        var ctx = new FakeCurrentContextService();
+        var db = AuthTestDb.CreateSqliteContext(ctx);
+        return (db, ctx);
+    }
+    
+    [Fact]
+    public async Task RegisterAsync_ShouldCreateUser_WhenEmailNotTaken()
+    {
+        // Arrange
+        var country = new Country("United States", "US", "USD", "America/New_York");
+        var ctx = new FakeCurrentContextService(tenantId: country.Id);
+        var db = AuthTestDb.CreateSqliteContext(ctx);
+        
+        db.Countries.Add(country);
+        await db.SaveChangesAsync();
+        
+        var svc = new UserService(db, ctx, CreatePasswordService(), NullLogger<UserService>.Instance);
+        var dto = new RegisterRequestDto
+        {
+            Email = "new@example.com",
+            Password = "P@ssw0rd",
+            FirstName = "John",
+            LastName = "Doe",
+            CountryId = country.Id
+        };
+        
+        // Act
+        var result = await svc.RegisterAsync(dto, CancellationToken.None);
+        
+        // Assert
+        result.IsSuccess.ShouldBeTrue();
+        result.Value!.Email.ShouldBe("new@example.com");
+        (await db.Users.CountAsync()).ShouldBe(1);
+    }
+    
+    [Fact]
+    public async Task RegisterAsync_ShouldFail_WhenEmailAlreadyExists()
+    {
+        // Arrange
+        var (db, ctx) = CreateContext();
+        var existingUser = new User { Email = "existing@example.com" };
+        db.Users.Add(existingUser);
+        await db.SaveChangesAsync();
+        
+        var svc = new UserService(db, ctx, CreatePasswordService(), NullLogger<UserService>.Instance);
+        var dto = new RegisterRequestDto { Email = "existing@example.com" };
+        
+        // Act
+        var result = await svc.RegisterAsync(dto, CancellationToken.None);
+        
+        // Assert
+        result.IsSuccess.ShouldBeFalse();
+        result.Error.ShouldContain("already exists");
+    }
+    
+    private static UserPasswordService CreatePasswordService()
+    {
+        var options = Options.Create(new PasswordHashingOptions());
+        return new UserPasswordService(options);
+    }
+}
+```
+
+### Domain Entity Unit Test Example
+```csharp
+using GoalifyNow.Rentals.Domain.Entities;
+using GoalifyNow.Rentals.Domain.Enums;
+
+namespace GoalifyNow.Rentals.UnitTests.Domain.Entities;
+
+public class PropertyTests
+{
+    [Fact]
+    public void AddImage_Should_AddImageToCollection()
+    {
+        // Arrange
+        var property = Property.Create("123 Main St", PropertyType.House, 1500m);
+        
+        // Act
+        property.AddImage("https://example.com/image.jpg", "https://example.com/thumb.jpg");
+        
+        // Assert
+        property.Images.Count.ShouldBe(1);
+        property.Images.First().ImageUrl.ShouldBe("https://example.com/image.jpg");
+    }
+    
+    [Fact]
+    public void AddImage_Should_RaiseDomainEvent()
+    {
+        // Arrange
+        var property = Property.Create("123 Main St", PropertyType.House, 1500m);
+        property.ClearDomainEvents();
+        
+        // Act
+        property.AddImage("https://example.com/image.jpg", "https://example.com/thumb.jpg");
+        
+        // Assert
+        property.DomainEvents.Count.ShouldBe(1);
+        property.DomainEvents.First().ShouldBeOfType<PropertyImageAddedEvent>();
+    }
+}
+```
+
+### Mocking with Moq
+```csharp
+using Moq;
+
+public class PaymentServiceTests
+{
+    [Fact]
+    public async Task ProcessPayment_Should_CallStripeGateway()
+    {
+        // Arrange
+        var mockStripeGateway = new Mock<IStripeGateway>();
+        mockStripeGateway
+            .Setup(x => x.CreatePaymentIntentAsync(It.IsAny<decimal>(), It.IsAny<string>()))
+            .ReturnsAsync(new PaymentIntent { Id = "pi_123", Status = "succeeded" });
+        
+        var service = new PaymentService(mockStripeGateway.Object);
+        
+        // Act
+        var result = await service.ProcessPaymentAsync(100m, "usd");
+        
+        // Assert
+        result.IsSuccess.ShouldBeTrue();
+        mockStripeGateway.Verify(
+            x => x.CreatePaymentIntentAsync(100m, "usd"), 
+            Times.Once
+        );
+    }
+}
+```
+
+---
+
+## Integration Testing
+
+### WebApplicationFactory Pattern
+```csharp
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace GoalifyNow.Auth.IntegrationTests;
+
+public class CustomWebApplicationFactory : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.ConfigureServices(services =>
+        {
+            // Remove real database
+            services.RemoveAll(typeof(DbContextOptions<AuthDbContext>));
+            
+            // Add in-memory database
+            services.AddDbContext<AuthDbContext>(options =>
+            {
+                options.UseInMemoryDatabase("TestDb");
+            });
+            
+            // Mock external services
+            services.RemoveAll(typeof(IStripeGateway));
+            services.AddScoped<IStripeGateway, MockStripeGateway>();
+            
+            // Build service provider and seed data
+            var sp = services.BuildServiceProvider();
+            using var scope = sp.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            db.Database.EnsureCreated();
+            SeedTestData(db);
+        });
+    }
+    
+    private static void SeedTestData(AuthDbContext db)
+    {
+        var country = new Country("US", "United States", "USD", "America/New_York");
+        db.Countries.Add(country);
+        db.SaveChanges();
+    }
+}
+```
+
+### API Integration Test Example
+```csharp
+using System.Net;
+using System.Net.Http.Json;
+using GoalifyNow.Auth.Contracts.DTOs.Auth;
+
+namespace GoalifyNow.Auth.IntegrationTests.API;
+
+public class AuthEndpointTests : IClassFixture<CustomWebApplicationFactory>
+{
+    private readonly HttpClient _client;
+    
+    public AuthEndpointTests(CustomWebApplicationFactory factory)
+    {
+        _client = factory.CreateClient();
+    }
+    
+    [Fact]
+    public async Task Register_ShouldReturn200_WithValidRequest()
+    {
+        // Arrange
+        var request = new RegisterRequestDto
+        {
+            Email = "test@example.com",
+            Password = "P@ssw0rd123",
+            FirstName = "Test",
+            LastName = "User",
+            CountryId = Guid.NewGuid()
+        };
+        
+        // Act
+        var response = await _client.PostAsJsonAsync("/api/auth/register", request);
+        
+        // Assert
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<TokenDto>();
+        result.ShouldNotBeNull();
+        result!.AccessToken.ShouldNotBeNullOrWhiteSpace();
+    }
+    
+    [Fact]
+    public async Task Login_ShouldReturn401_WithInvalidCredentials()
+    {
+        // Arrange
+        var request = new LoginRequestDto
+        {
+            Email = "nonexistent@example.com",
+            Password = "WrongPassword"
+        };
+        
+        // Act
+        var response = await _client.PostAsJsonAsync("/api/auth/login", request);
+        
+        // Assert
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+}
+```
+
+### Testcontainers for Real Database Tests
+```csharp
+using Testcontainers.MsSql;
+
+namespace GoalifyNow.Rentals.IntegrationTests;
+
+public class RentalsDbIntegrationTests : IAsyncLifetime
+{
+    private MsSqlContainer _mssqlContainer = null!;
+    private RentalsDbContext _dbContext = null!;
+    
+    public async Task InitializeAsync()
+    {
+        _mssqlContainer = new MsSqlBuilder()
+            .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+            .Build();
+            
+        await _mssqlContainer.StartAsync();
+        
+        var options = new DbContextOptionsBuilder<RentalsDbContext>()
+            .UseSqlServer(_mssqlContainer.GetConnectionString())
+            .Options;
+            
+        _dbContext = new RentalsDbContext(
+            options, 
+            new FakeCurrentContextService(), 
+            null!, 
+            NullLogger<RentalsDbContext>.Instance
+        );
+        
+        await _dbContext.Database.MigrateAsync();
+    }
+    
+    [Fact]
+    public async Task CanCreateAndRetrieveProperty()
+    {
+        // Arrange
+        var property = Property.Create("123 Main St", PropertyType.House, 1500m);
+        
+        // Act
+        _dbContext.Properties.Add(property);
+        await _dbContext.SaveChangesAsync();
+        
+        var retrieved = await _dbContext.Properties.FindAsync(property.Id);
+        
+        // Assert
+        retrieved.ShouldNotBeNull();
+        retrieved!.Address.ShouldBe("123 Main St");
+    }
+    
+    public async Task DisposeAsync()
+    {
+        await _dbContext.DisposeAsync();
+        await _mssqlContainer.DisposeAsync();
+    }
+}
+```
+
+### Respawn for Database Cleanup
+```csharp
+using Respawn;
+
+public class DatabaseFixture : IAsyncLifetime
+{
+    private Respawner _respawner = null!;
+    private readonly string _connectionString;
+    
+    public async Task InitializeAsync()
+    {
+        _respawner = await Respawner.CreateAsync(_connectionString, new RespawnerOptions
+        {
+            DbAdapter = DbAdapter.SqlServer,
+            TablesToIgnore = ["__EFMigrationsHistory"]
+        });
+    }
+    
+    public async Task ResetDatabaseAsync()
+    {
+        await _respawner.ResetAsync(_connectionString);
+    }
+    
+    public Task DisposeAsync() => Task.CompletedTask;
+}
+
+public class MyIntegrationTests : IClassFixture<DatabaseFixture>
+{
+    private readonly DatabaseFixture _fixture;
+    
+    public MyIntegrationTests(DatabaseFixture fixture)
+    {
+        _fixture = fixture;
+    }
+    
+    [Fact]
+    public async Task Test1()
+    {
+        // Database starts clean
+        // ... test logic
+    }
+    
+    [Fact]
+    public async Task Test2()
+    {
+        await _fixture.ResetDatabaseAsync(); // Clean between tests
+        // ... test logic
+    }
+}
+```
+
+---
+
+## Architecture Tests
+
+### Enforce Architectural Rules
+```csharp
+using NetArchTest.Rules;
+
+namespace GoalifyNow.ArchitectureTests;
+
+public class ArchitectureTests
+{
+    private const string DomainNamespace = "GoalifyNow.*.Domain";
+    private const string ApplicationNamespace = "GoalifyNow.*.Application";
+    private const string InfrastructureNamespace = "GoalifyNow.*.Infrastructure";
+    private const string ApiNamespace = "GoalifyNow.*.API";
+    
+    [Fact]
+    public void Domain_Should_NotHaveExternalDependencies()
+    {
+        // Arrange
+        var assembly = typeof(GoalifyNow.Auth.Domain.Entities.User).Assembly;
+        
+        // Act
+        var result = Types.InAssembly(assembly)
+            .That().ResideInNamespace(DomainNamespace)
+            .ShouldNot().HaveDependencyOnAny(
+                "Microsoft.EntityFrameworkCore",
+                "Microsoft.AspNetCore",
+                "Azure",
+                "Stripe"
+            )
+            .GetResult();
+        
+        // Assert
+        result.IsSuccessful.ShouldBeTrue();
+    }
+    
+    [Fact]
+    public void Application_Should_NotDependOnInfrastructure()
+    {
+        // Arrange
+        var assembly = typeof(GoalifyNow.Auth.Application.DependencyInjection).Assembly;
+        
+        // Act
+        var result = Types.InAssembly(assembly)
+            .That().ResideInNamespace(ApplicationNamespace)
+            .ShouldNot().HaveDependencyOn(InfrastructureNamespace)
+            .GetResult();
+        
+        // Assert
+        result.IsSuccessful.ShouldBeTrue();
+    }
+    
+    [Fact]
+    public void Entities_Should_InheritFromEntity()
+    {
+        // Arrange
+        var assembly = typeof(GoalifyNow.Auth.Domain.Entities.User).Assembly;
+        
+        // Act
+        var result = Types.InAssembly(assembly)
+            .That().ResideInNamespace("GoalifyNow.Auth.Domain.Entities")
+            .Should().Inherit(typeof(Entity))
+            .Or().Inherit(typeof(AggregateRoot))
+            .GetResult();
+        
+        // Assert
+        result.IsSuccessful.ShouldBeTrue();
+    }
+}
+```
+
+---
+
+## Validator Testing
+
+### FluentValidation Test Helpers
+```csharp
+using FluentValidation.TestHelper;
+using GoalifyNow.Rentals.Application.Features.Properties.Validators;
+
+namespace GoalifyNow.Rentals.UnitTests.Validators;
+
+public class CreatePropertyValidatorTests
+{
+    private readonly CreatePropertyValidator _validator = new();
+    
+    [Fact]
+    public void Should_HaveError_WhenAddressIsEmpty()
+    {
+        // Arrange
+        var dto = new CreatePropertyDto { Address = "" };
+        
+        // Act
+        var result = _validator.TestValidate(dto);
+        
+        // Assert
+        result.ShouldHaveValidationErrorFor(x => x.Address)
+            .WithErrorMessage("Address is required");
+    }
+    
+    [Fact]
+    public void Should_HaveError_WhenMonthlyRentIsNegative()
+    {
+        // Arrange
+        var dto = new CreatePropertyDto { MonthlyRent = -100m };
+        
+        // Act
+        var result = _validator.TestValidate(dto);
+        
+        // Assert
+        result.ShouldHaveValidationErrorFor(x => x.MonthlyRent)
+            .WithErrorMessage("Monthly rent must be positive");
+    }
+    
+    [Fact]
+    public void Should_NotHaveError_WhenDtoIsValid()
+    {
+        // Arrange
+        var dto = new CreatePropertyDto 
+        { 
+            Address = "123 Main St", 
+            MonthlyRent = 1500m,
+            Type = PropertyType.House
+        };
+        
+        // Act
+        var result = _validator.TestValidate(dto);
+        
+        // Assert
+        result.ShouldNotHaveAnyValidationErrors();
+    }
+}
+```
+
+---
+
+## Testing Best Practices
+
+### 1. Naming Convention
+```
+MethodName_Should_ExpectedBehavior_When_StateUnderTest
+
+Examples:
+- RegisterAsync_ShouldCreateUser_WhenEmailNotTaken
+- Login_ShouldReturn401_WithInvalidCredentials
+- AddImage_Should_RaiseDomainEvent
+```
+
+### 2. Arrange-Act-Assert Pattern
+```csharp
+[Fact]
+public async Task ExampleTest()
+{
+    // Arrange - Set up test data and dependencies
+    var service = new MyService(mockDependency.Object);
+    var input = new MyDto { Value = "test" };
+    
+    // Act - Execute the method under test
+    var result = await service.DoSomethingAsync(input);
+    
+    // Assert - Verify the outcome
+    result.IsSuccess.ShouldBeTrue();
+    result.Value.ShouldBe("expected");
+}
+```
+
+### 3. Use Shouldly for Fluent Assertions
+```csharp
+// Shouldly (GOOD)
+result.IsSuccess.ShouldBeTrue();
+result.Value.ShouldBe("expected");
+users.Count.ShouldBe(3);
+exception.Message.ShouldContain("not found");
+
+// xUnit Assert (avoid)
+Assert.True(result.IsSuccess);
+Assert.Equal("expected", result.Value);
+```
+
+### 4. Test One Thing Per Test
+```csharp
+// BAD - Testing multiple things
+[Fact]
+public async Task RegisterAndLogin()
+{
+    await RegisterUser();
+    var loginResult = await LoginUser();
+    loginResult.ShouldNotBeNull();
+}
+
+// GOOD - Separate tests
+[Fact]
+public async Task Register_ShouldCreateUser() { ... }
+
+[Fact]
+public async Task Login_ShouldReturnToken_WithValidCredentials() { ... }
+```
+
+### 5. Use Test Fixtures for Shared Setup
+```csharp
+public class DatabaseFixture : IDisposable
+{
+    public DbContext DbContext { get; }
+    
+    public DatabaseFixture()
+    {
+        DbContext = CreateTestDatabase();
+    }
+    
+    public void Dispose()
+    {
+        DbContext.Dispose();
+    }
+}
+
+public class MyTests : IClassFixture<DatabaseFixture>
+{
+    private readonly DatabaseFixture _fixture;
+    
+    public MyTests(DatabaseFixture fixture)
+    {
+        _fixture = fixture;
+    }
+}
+```
+
+---
+
+## Running Tests
+
+### Command Line
+```bash
+# Run all tests
+dotnet test
+
+# Run specific test project
+dotnet test src/tests/GoalifyNow.Auth/GoalifyNow.Auth.UnitTests
+
+# Run with coverage
+dotnet test --collect:"XPlat Code Coverage"
+
+# Run tests matching filter
+dotnet test --filter "FullyQualifiedName~UserServiceTests"
+```
+
+### CI/CD Integration
+Tests are automatically run in GitHub Actions:
+```yaml
+- name: Run tests
+  run: dotnet test --no-build --verbosity normal
+```
+
+---
+
+## Code Coverage
+
+Use Coverlet for code coverage:
+```bash
+dotnet test --collect:"XPlat Code Coverage"
+```
+
+Target coverage thresholds:
+- **Domain Layer:** 90%+
+- **Application Layer:** 80%+
+- **Infrastructure Layer:** 60%+
+- **API Layer:** 70%+
+
+---
+
+**For service-specific test examples, see service-specific cursor rules.**

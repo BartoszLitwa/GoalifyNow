@@ -1,0 +1,25 @@
+---
+description: Angular webapp conventions for GoalifyNow
+globs:
+  - "apps/webapp/**"
+alwaysApply: false
+---
+
+# GoalifyNow WebApp
+
+## Scope
+
+`apps/webapp` — Angular application (standalone components, modern CLI layout).
+
+## Practices
+
+- Prefer standalone components and lazy-loaded routes consistent with existing features
+- Use the project's chosen UI and styling approach without introducing parallel design systems
+- Keep strings out of templates where the app already uses i18n or shared constants
+- Use typed HTTP clients or services matching backend contracts under `backend/GoalifyNow.Api`
+- After substantive UI changes, run `pnpm build:web` from the repository root when feasible
+
+## API integration
+
+- Respect environment files under `apps/webapp/src/environments/` for base URLs
+- Do not hardcode secrets; use existing configuration mechanisms

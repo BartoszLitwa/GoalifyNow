@@ -1,0 +1,17 @@
+---
+description: E2E Playwright scope for GoalifyNow
+globs:
+  - "e2e/**/*.ts"
+  - "e2e/**/*.spec.ts"
+alwaysApply: false
+---
+
+# GoalifyNow E2E (Playwright)
+
+When editing files under `e2e/`, follow:
+
+- `00 - E2E Testing.mdc`
+- `00 - E2E Testing - Playwright.mdc`
+- `00 - E2E Testing - Best Practices.mdc`
+
+Keep tests aligned with the Angular app in `apps/webapp` and any configured base URL in `e2e/playwright.config.ts`.

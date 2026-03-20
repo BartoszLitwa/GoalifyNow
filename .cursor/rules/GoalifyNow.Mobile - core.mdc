@@ -1,0 +1,20 @@
+---
+description: Tauri mobile wrapper for GoalifyNow
+globs:
+  - "mobile/**"
+  - "apps/webapp/src/environments/**"
+alwaysApply: false
+---
+
+# GoalifyNow Mobile
+
+## Scope
+
+`mobile/` hosts the Tauri project; the web UI is built from `apps/webapp`.
+
+## Practices
+
+- Use the `package.json` scripts under `mobile/` for iOS and Android dev and release builds
+- Preserve safe-area and touch-target guidance already used in the web app when adjusting shell or webview-related layout
+- Keep API host resolution consistent with web environment configuration; avoid hardcoded machine IPs in source
+- Validate critical flows on both iOS and Android when changing navigation or deep links

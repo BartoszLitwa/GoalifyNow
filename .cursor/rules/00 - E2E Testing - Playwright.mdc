@@ -1,0 +1,431 @@
+---
+description: Playwright E2E Testing Best Practices and Patterns for GoalifyNow
+globs:
+  - "e2e/**/*.ts"
+  - "e2e/**/*.spec.ts"
+  - "e2e/playwright.config.ts"
+alwaysApply: false
+---
+
+# GoalifyNow E2E Testing with Playwright
+
+## Overview
+GoalifyNow uses Playwright for end-to-end testing. Tests are organized using the Page Object Model pattern and use the test fixtures system for authentication and data management.
+
+---
+
+## Directory Structure
+
+```
+tests/
+├── config/
+│   └── test-config.ts       # Centralized configuration
+├── fixtures/
+│   └── billing-fixtures.ts  # Mock data fixtures
+├── pages/
+│   ├── base-page.ts         # Base page class with common methods
+│   ├── login-page.ts        # Authentication page
+│   ├── dashboard-page.ts    # Dashboard page
+│   ├── finances-page.ts     # Finances dashboard
+│   ├── rent-payments-page.ts
+│   ├── security-deposits-page.ts
+│   ├── late-fees-page.ts
+│   ├── invoices-page.ts
+│   ├── net-worth-page.ts
+│   └── investments-page.ts
+├── setup/
+│   ├── global-setup.ts      # Global setup before all tests
+│   ├── global-teardown.ts   # Global teardown after all tests
+│   └── test-fixtures.ts     # Playwright fixtures
+├── specs/
+│   ├── smoke/               # Quick smoke tests
+│   └── finances/            # Financial module tests
+└── utils/
+    ├── auth-helper.ts       # Authentication utilities
+    ├── api-helper.ts        # API interaction utilities
+    └── test-data-manager.ts # Test data creation/cleanup
+```
+
+---
+
+## Test Tagging Convention
+
+Use tags to categorize tests for selective execution:
+
+```typescript
+test.describe('Feature Tests @feature @regression', () => {
+  test('should do something @smoke @prod', async () => {});
+  test('should do something else @local', async () => {});
+});
+```
+
+### Standard Tags
+- `@smoke` - Quick smoke tests, run on every deployment
+- `@regression` - Full regression tests
+- `@prod` - Safe to run in production (read-only)
+- `@local` - Only for local development (may modify data)
+- `@critical` - Critical path tests
+- `@e2e` - Full end-to-end tests
+- `@api` - API-level tests
+
+### Feature Tags
+- `@finances` - Financial module tests
+- `@rent-payments` - Rent payments page
+- `@security-deposits` - Security deposits page
+- `@invoices` - Invoices page
+- `@late-fees` - Late fees page
+- `@net-worth` - Net worth tracking
+- `@investments` - Investment analysis
+
+### Quality Tags
+- `@performance` - Performance tests
+- `@responsive` - Responsive design tests
+- `@error` - Error handling tests
+
+---
+
+## Page Object Model Pattern
+
+### Base Page Class
+All page objects extend `BasePage` which provides common functionality:
+
+```typescript
+import { Page, expect } from '@playwright/test';
+import { BasePage } from './base-page';
+import TestConfig from '../config/test-config';
+
+export class MyFeaturePage extends BasePage {
+  // Private selectors using data-testid when available
+  private readonly pageContainer = '[data-testid="feature-page"]';
+  private readonly submitButton = '[data-testid="submit-btn"]';
+  
+  constructor(page: Page) {
+    super(page);
+  }
+
+  async goto(): Promise<void> {
+    await this.page.goto('/feature-path');
+    await this.waitForPageLoad();
+  }
+
+  async verifyPageDisplayed(): Promise<void> {
+    await expect(this.page.locator(this.pageContainer))
+      .toBeVisible({ timeout: TestConfig.timeouts.medium });
+  }
+  
+  // Always wait for data to load
+  async waitForDataLoad(): Promise<void> {
+    await this.waitForLoadingComplete();
+    await Promise.race([
+      this.page.locator('.data-table').waitFor({ state: 'visible', timeout: 15000 }),
+      this.page.locator('.empty-state').waitFor({ state: 'visible', timeout: 15000 })
+    ]).catch(() => {});
+  }
+}
+```
+
+### Selector Best Practices
+1. **Prefer `data-testid` attributes** - Most reliable
+2. **Use semantic selectors** - `role`, `label`, `text` when data-testid unavailable
+3. **Avoid brittle selectors** - No `.class-name:nth-child(2)` patterns
+4. **Handle PrimeNG components** - Many have nested inputs
+
+```typescript
+// Good selectors
+private readonly emailInput = '[data-testid="email-input"]';
+private readonly submitButton = 'p-button[data-testid="submit"]';
+private readonly pageTitle = 'h1:has-text("My Page")';
+
+// For PrimeNG components with nested inputs
+const input = this.page.locator('[data-testid="amount-input"]').locator('input');
+await input.fill('100');
+```
+
+---
+
+## Test Fixtures Usage
+
+### Available Fixtures
+```typescript
+import { test, expect } from '../../setup/test-fixtures';
+
+test.describe('My Tests', () => {
+  test('using fixtures', async ({ 
+    page,                 // Playwright page
+    demoUsersAvailable,   // Boolean: are demo users seeded
+    testDataManager,      // Test data creation/cleanup
+    authenticatedUser,    // Pre-authenticated user info
+    api,                  // API helper
+    cleanup               // Cleanup manager
+  }) => {
+    // Skip if no demo users
+    test.skip(!demoUsersAvailable, 'Demo users not seeded');
+    
+    // Test implementation
+  });
+});
+```
+
+### Authentication Pattern
+```typescript
+test.beforeEach(async ({ page, demoUsersAvailable }) => {
+  test.skip(!demoUsersAvailable, 'Demo users not seeded');
+  
+  loginPage = new LoginPage(page);
+  await loginPage.goto();
+  await loginPage.loginAsLandlord();
+  
+  // Wait for login to complete
+  await page.waitForURL(url => !url.pathname.includes('/auth/login'), { 
+    timeout: 30000 
+  });
+});
+```
+
+---
+
+## Test Structure
+
+### Standard Test Template
+```typescript
+import { test, expect } from '../../setup/test-fixtures';
+import { MyFeaturePage } from '../../pages/my-feature-page';
+import { LoginPage } from '../../pages/login-page';
+
+/**
+ * My Feature E2E Tests
+ * 
+ * Tags: @feature @regression
+ */
+test.describe('My Feature - Comprehensive Tests @feature @regression', () => {
+  let featurePage: MyFeaturePage;
+  let loginPage: LoginPage;
+
+  test.beforeEach(async ({ page, demoUsersAvailable }) => {
+    test.skip(!demoUsersAvailable, 'Demo users not seeded');
+    
+    featurePage = new MyFeaturePage(page);
+    loginPage = new LoginPage(page);
+    
+    await loginPage.goto();
+    await loginPage.loginAsLandlord();
+    await page.waitForURL(url => !url.pathname.includes('/auth/login'), { 
+      timeout: 30000 
+    });
+  });
+
+  test.describe('Page Load @smoke @prod', () => {
+    test('should load page successfully', async ({ page }) => {
+      await featurePage.goto();
+      await featurePage.verifyPageDisplayed();
+      await expect(page).toHaveURL(/.*feature/);
+    });
+  });
+
+  test.describe('Feature Functionality @regression', () => {
+    test('should perform action', async () => {
+      await featurePage.goto();
+      await featurePage.waitForDataLoad();
+      // Test implementation
+    });
+  });
+
+  test.describe('Error Handling @error', () => {
+    test('should handle API errors gracefully', async ({ page }) => {
+      await page.route('**/api/feature/**', route => route.abort('failed'));
+      await featurePage.goto();
+      await featurePage.verifyPageDisplayed();
+    });
+  });
+
+  test.describe('Responsive Design @responsive', () => {
+    test('should work on mobile viewport', async ({ page }) => {
+      await page.setViewportSize({ width: 375, height: 667 });
+      await featurePage.goto();
+      await featurePage.verifyPageDisplayed();
+    });
+  });
+});
+```
+
+---
+
+## Common Patterns
+
+### Handling Rate Limiting
+The Auth API has rate limiting. Handle gracefully:
+```typescript
+// In fixtures, rate limiting is handled with exponential backoff
+// In tests, skip if authentication fails
+test.beforeEach(async ({ demoUsersAvailable }) => {
+  test.skip(!demoUsersAvailable, 'Demo users not seeded');
+});
+```
+
+### Waiting for Dynamic Content
+```typescript
+// Wait for either success or empty state
+await Promise.race([
+  this.page.locator('.data-table').waitFor({ state: 'visible', timeout: 15000 }),
+  this.page.locator('.empty-state').waitFor({ state: 'visible', timeout: 15000 })
+]).catch(() => {});
+
+// Wait for loading to complete
+async waitForLoadingComplete(): Promise<void> {
+  const loadingIndicator = this.page.locator('p-progressSpinner, .loading');
+  await loadingIndicator.waitFor({ state: 'hidden', timeout: 30000 }).catch(() => {});
+}
+```
+
+### Handling PrimeNG Components
+```typescript
+// Dropdown/Select
+await this.page.locator('p-select').click();
+await this.page.locator('li:has-text("Option")').click();
+
+// Dialog
+const dialog = this.page.locator('p-dialog');
+await expect(dialog).toBeVisible();
+await dialog.locator('p-button:has-text("Save")').click();
+
+// Table
+const rows = this.page.locator('p-table tbody tr');
+const count = await rows.count();
+```
+
+### Test Data Management
+```typescript
+// Create data for test
+const user = await testDataManager.createTestUser();
+
+// Data is automatically cleaned up after test via fixture
+```
+
+---
+
+## Running Tests
+
+### Local Development
+```bash
+# Run all tests
+npx playwright test
+
+# Run specific file
+npx playwright test tests/specs/finances/finances-smoke.spec.ts
+
+# Run by tag
+npx playwright test --grep "@smoke"
+
+# Run single browser
+npx playwright test --project=chromium
+
+# Debug mode
+npx playwright test --debug
+
+# UI mode
+npx playwright test --ui
+```
+
+### CI/CD
+```bash
+# Smoke tests only (fast)
+npx playwright test --grep "@smoke @prod"
+
+# Full regression
+npx playwright test --grep "@regression"
+
+# Skip local-only tests
+npx playwright test --grep-invert "@local"
+```
+
+---
+
+## Configuration
+
+### Environment Variables
+```env
+# .env or tests/.env
+BASE_URL=http://localhost:4200
+TEST_LANDLORD_EMAIL=landlord1@demo.com
+TEST_LANDLORD_PASSWORD=Test123!
+TEST_TENANT_EMAIL=tenant1@demo.com
+TEST_TENANT_PASSWORD=Test123!
+E2E_TENANT_ID=default
+E2E_DISABLE_AUTO_LOGIN=false
+E2E_ALLOW_LEGACY_DEMO_USERS=false
+```
+
+Legacy demo aliases (`landlord1@demo.com`, `tenant1@demo.com`, `admin@rentifynow.com`) cause config to throw unless `E2E_ALLOW_LEGACY_DEMO_USERS=true`.
+
+### Test Config
+```typescript
+// tests/config/test-config.ts
+export default {
+  baseUrl: process.env.BASE_URL || 'http://localhost:4200',
+  apiUrls: {
+    auth: process.env.AUTH_API_URL || 'https://localhost:5010',
+    payments: process.env.PAYMENTS_API_URL || 'https://localhost:5020',
+    // ...
+  },
+  credentials: {
+    landlord: {
+      email: process.env.TEST_LANDLORD_EMAIL || 'e2e-landlord@demo.com',
+      password: process.env.TEST_LANDLORD_PASSWORD || 'Test123!'
+    },
+    tenant: {
+      email: process.env.TEST_TENANT_EMAIL || 'e2e-tenant@demo.com',
+      password: process.env.TEST_TENANT_PASSWORD || 'Test123!'
+    },
+    admin: {
+      email: process.env.TEST_ADMIN_EMAIL || 'e2e-admin@demo.com',
+      password: process.env.TEST_ADMIN_PASSWORD || 'Test123!'
+    }
+  },
+  timeouts: {
+    short: 5000,
+    medium: 15000,
+    long: 30000
+  }
+};
+```
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Rate Limiting**: Wait between test runs or use `demoUsersAvailable` check
+2. **Element Not Found**: Verify selector matches current UI, check for PrimeNG nested elements
+3. **Timeout**: Increase timeout or add proper wait conditions
+4. **Auth Failures**: Ensure demo users are seeded via `SeedDemoAccounts.cs`
+
+### Debug Tips
+```typescript
+// Add screenshots on failure
+await page.screenshot({ path: 'debug.png' });
+
+// Log element state
+const element = this.page.locator('.my-element');
+console.log('Visible:', await element.isVisible());
+console.log('Count:', await element.count());
+console.log('Text:', await element.textContent());
+
+// Pause execution
+await page.pause();
+```
+
+---
+
+## Adding New Tests
+
+1. **Create page object** in `tests/pages/`
+2. **Create test spec** in `tests/specs/<feature>/`
+3. **Add appropriate tags** for categorization
+4. **Follow create-test-cleanup pattern** for data
+5. **Update this rule file** if adding new patterns
+
+---
+
+**Last Updated:** 2026-01-23
+**Status:** Active - Enforced for all E2E tests

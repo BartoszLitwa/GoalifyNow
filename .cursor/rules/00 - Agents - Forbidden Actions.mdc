@@ -1,0 +1,7 @@
+---
+description: Hard prohibitions for agents in this repository
+alwaysApply: true
+---
+
+1. Never commit or push changes in git without explicit user request.
+2. Never stop, kill, or restart local development hosts without explicit user request (for example Aspire, Docker Compose, `pnpm` or `npm` dev servers, `dotnet run`, or Tauri dev processes).

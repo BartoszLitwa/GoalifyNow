@@ -1,0 +1,57 @@
+---
+description: Master index of Cursor rules for GoalifyNow
+alwaysApply: true
+---
+
+# GoalifyNow Cursor Rules Index
+
+These `.cursor/rules/*.mdc` files are the **primary source of truth** for AI assistant behavior in this repository.
+
+## Agent behavior (always-on)
+
+- **00 - SubAgent - Disable.mdc** — Never use the Task tool or subagents
+- **00 - Agents - Forbidden Actions.mdc** — Git and local dev host prohibitions
+- **00 - OpenAI Agentic Workflow.mdc** — Tool-first, complete the task
+- **00 - Cursor AI Prompting Rules.mdc** — How to use templates
+- **00 - Agent - Execution Rules.mdc** — No early stop, verification, single-agent context
+- **01 - core.mdc** — Persona, operating principles, repo layout
+- **.cursorrules.mdc** — Documentation policy, comment policy, response style
+
+## Templates (manual)
+
+- **02 - request.mdc** — Feature / modification prompt
+- **03 - refresh.mdc** — Re-diagnosis after a failed fix
+
+## Backend (.NET)
+
+- **04 - csharp.mdc** — C# conventions
+- **00 - EFCore - core.mdc** — EF Core patterns
+- **00 - Backend - Testing.mdc** — xUnit, Shouldly, integration tests
+- **GoalifyNow.Api - core.mdc** — API project under `backend/`
+
+## Frontend & mobile
+
+- **GoalifyNow.WebApp - core.mdc** — Angular app under `apps/webapp`
+- **GoalifyNow.Mobile - core.mdc** — Tauri `mobile/` wrapper
+
+## Cross-cutting
+
+- **00 - Security - Authentication.mdc** — Auth patterns
+- **00 - Security - Best Practices.mdc** — Hardening checklist
+- **00 - Integration - Backend Frontend.mdc** — Web and API integration
+
+## E2E
+
+- **00 - E2E Testing.mdc** — Structure and conventions
+- **00 - E2E Testing - Playwright.mdc** — Playwright specifics
+- **00 - E2E Testing - Best Practices.mdc** — Stability and tagging
+
+## Optional scope files
+
+- **.cursorrules-e2e.mdc** — Extra Playwright guidance when editing `e2e/**`
+
+## Skills
+
+- `.cursor/skills/00-security-best-practices/SKILL.md` — Security reference (invoke when relevant)
+
+**Last updated:** 2026-03-20

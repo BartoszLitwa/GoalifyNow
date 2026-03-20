@@ -1,0 +1,86 @@
+---
+description: EF Core rules and migration guidelines for all GoalifyNow services
+globs:
+  - "src/services/**/Infrastructure/**"
+  - "src/services/**/Domain/**"
+  - "src/services/**/Application/**"
+alwaysApply: false
+---
+# Cursor Rules: EF Core Setup and Migrations
+
+## Overview
+These rules define the architectural and implementation standards for all Entity Framework Core (EF Core) usage across all GoalifyNow microservices. They are enforceable conventions for all contributors and reviewers.
+
+---
+
+## EF Core Migration Rules
+
+### 1. **One Initial Migration Per Service**
+   - **Each microservice must have exactly ONE initial migration** that creates all tables for that service.
+   - **No separate migrations for individual tables** - all tables for a service are created in the initial migration.
+   - Migration naming: `InitialCreate` (not `CreateTableName`).
+   - Example: AI service has one `InitialCreate` migration with Conversations, Messages, UsageRecords, and ModelPricings tables.
+
+### 2. **Migration Structure**
+   - **Schema-based**: Each service uses its own schema (e.g., `ai`, `payments`, `rentals`).
+   - **Complete Up/Down**: Every migration must have both `Up()` and `Down()` methods.
+   - **No empty migrations**: All migrations must contain actual table creation/dropping code.
+
+### 3. **Migration Workflow**
+   ```bash
+   # Create initial migration for new service
+   dotnet ef migrations add InitialCreate --context YourDbContext
+
+   # For existing services, remove bad migrations and recreate
+   dotnet ef migrations remove --force
+   dotnet ef migrations add InitialCreate --context YourDbContext
+   ```
+
+### 4. **Migration Content**
+   - **All tables in one migration**: Include all entity tables in the initial migration.
+   - **Proper constraints**: Primary keys, foreign keys, unique indexes, check constraints.
+   - **Tenant isolation**: All tables include `TenantId` column for multi-tenancy.
+   - **Auditing columns**: `CreatedAt`, `CreatedBy`, `UpdatedAt`, `UpdatedBy`, `IsActive`, `DeletedAt`, `DeletedBy`.
+
+---
+
+## EF Core Query & Service Layer Rules
+
+### 1. **SQL-Only Filtering, Sorting, and Paging**
+   - All filtering, sorting, and paging must be performed in SQL (never in-memory LINQ in services).
+   - No `.OrderBy`, `.Where`, `.Take`, `.Skip`, or `.Sum` on in-memory collections in the service layer.
+
+### 2. **Centralized Compiled Queries**
+   - All queries must use compiled queries (`EF.CompileQuery` or `EF.CompileAsyncQuery`).
+   - All compiled queries must be defined in a dedicated compiled queries class (e.g., `FinancialPlanItemCompiledQueries`).
+   - No direct LINQ-to-Entities or DbContext queries in service classes.
+
+### 3. **Async-First Data Access**
+   - All queries that can be async must use `EF.CompileAsyncQuery` and be awaited in services.
+   - Synchronous compiled queries are only allowed if async is not possible.
+
+### 4. **Service Layer Responsibilities**
+   - Service classes must only call compiled queries and perform DTO mapping.
+   - No business logic, filtering, or projection in the service layer that could be performed in SQL.
+   - All DTO mapping must be performed after data is materialized from the database.
+
+### 5. **Parallelization for Aggregation**
+   - For endpoints that aggregate multiple queries, SQL calls must be parallelized using async/await and `Task.WhenAll`.
+
+### 6. **Enum Mapping**
+   - All enum properties must be mapped with `.HasConversion<int>()` in EF Core configuration.
+
+### 7. **Paging Defaults**
+   - Paging defaults to 100 records unless otherwise specified by the endpoint or consumer.
+
+### 8. **Enforcement**
+   - All new queries and service methods must follow these conventions.
+   - Code reviews must verify compliance with these rules.
+   - Migration reviews must ensure one initial migration per service.
+
+---
+
+## Rationale
+These rules ensure maximum performance, maintainability, and consistency for all EF Core data access across GoalifyNow microservices. They prevent common pitfalls such as N+1 queries, in-memory filtering, and thread pool exhaustion, and enable scalable, testable, and robust service logic.
+
+The one-migration-per-service rule simplifies deployment and rollback scenarios, making database schema management more predictable and maintainable.

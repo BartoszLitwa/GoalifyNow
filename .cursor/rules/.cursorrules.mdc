@@ -1,0 +1,165 @@
+---
+description: Project-wide cursor rules for GoalifyNow - Agent behavior and documentation policies
+alwaysApply: true
+---
+
+# GoalifyNow Project-Wide Cursor Rules
+
+## 🚫 CRITICAL: Documentation and Summary Rules
+
+### **NEVER Create Documentation Files Unless Explicitly Requested**
+
+**FORBIDDEN unless explicitly asked:**
+- ❌ Summary markdown files (e.g., `*-SUMMARY.md`, `*-FIX.md`, `*-IMPLEMENTATION.md`)
+- ❌ Fix plan documents
+- ❌ Implementation guides
+- ❌ Verification documents
+- ❌ "Next steps" documents
+- ❌ Any `.md` files documenting changes made during the session
+
+**Why:** These files clutter the repository and are rarely needed. The git history and commit messages are sufficient.
+
+**Exception:** Only create documentation if the user explicitly says:
+- "Create documentation for..."
+- "Document this..."
+- "Write a guide for..."
+- "Create a README for..."
+
+### **Keep Responses Concise**
+
+**DO:**
+- ✅ Provide brief, actionable summaries
+- ✅ List what was changed (file paths, key changes)
+- ✅ Mention next steps if critical
+- ✅ Keep it short and to the point
+
+**DON'T:**
+- ❌ Write lengthy explanations unless asked
+- ❌ Include "benefits" sections
+- ❌ Add "verification checklists"
+- ❌ Create tables comparing before/after
+- ❌ Write "Key Insights" or "Design Decisions" sections
+
+**Example of GOOD response:**
+```
+Fixed domain events to use ActiveCountryId instead of TenantId.
+
+Changed:
+- AuthUser.UpdateLastLogin()
+- AuthUser.LinkExternalIdentity()
+- AuthUser.Deactivate()
+- AuthUser.Activate()
+
+Build successful. Ready to test.
+```
+
+**Example of BAD response:**
+```
+✅ Task Complete: Domain Events Fix for Tenant-Agnostic Users
+
+I've successfully fixed the domain event error! Here's a comprehensive summary:
+
+🎯 Key Changes:
+[... lengthy explanation ...]
+
+📊 What Changed:
+[... large table ...]
+
+✅ Benefits:
+[... unnecessary list ...]
+
+📝 Documentation Created:
+- SUMMARY.md
+- FIX-GUIDE.md
+[... etc ...]
+```
+
+---
+
+## 📋 Standard Operating Procedure
+
+1. **Make changes** (code, config, migrations)
+2. **Verify** (build, test if needed)
+3. **Report concisely** (what changed, what's next)
+4. **STOP** - Don't create extra files
+
+---
+
+## 🎯 Summary
+
+- **NEVER create documentation markdown files unless explicitly requested**
+- **Keep all responses concise and actionable**
+- **Focus on doing the work, not documenting it**
+- **Trust that git history is sufficient**
+
+---
+
+## 🚫 CRITICAL: Code Comments Policy (Zero Comments)
+
+### **NEVER Use Traditional Comments**
+
+**PROHIBITED in all code:**
+- ❌ Single-line comments (`//`)
+- ❌ Multi-line comments (`/* */`)
+- ❌ XML documentation comments (`///`, `<summary>`, `<param>`, `<returns>`)
+- ❌ TODO comments of any kind
+- ❌ HACK/FIXME/NOTE comments
+- ❌ Region comments explaining code
+- ❌ Any natural language explanation outside of functional Endpoint Summary
+
+### **ALLOWED Documentation Points (Backend C# / FastEndpoints)**
+
+**These are the ONLY acceptable documentation mechanisms:**
+- ✅ `Summary()` method inside FastEndpoints classes (for OpenAPI/Swagger docs)
+- ✅ `[Description]` attributes inside FastEndpoints classes
+- ✅ Functional C# attributes (`[Authorize]`, `[AllowAnonymous]`, `[ApiController]`, `[BindFrom]`, etc.)
+
+### **ALLOWED Documentation Points (Frontend Angular)**
+
+**No comments allowed - use descriptive naming instead:**
+- ✅ Functional decorators (`@Component`, `@NgModule`, `@Injectable`, etc.)
+- ✅ Descriptive variable and function names
+- ✅ Well-structured, self-documenting code
+
+### **When Logic is Complex**
+
+**If code requires explanation to understand:**
+1. Refactor into smaller, well-named private methods
+2. Use descriptive constant names that explain the "why"
+3. Extract complex conditions into named boolean variables
+4. Use meaningful enum values
+
+**Example - BAD:**
+```csharp
+// Check if user has access (must be admin or owner)
+if (user.Role == "Admin" || user.Id == resource.OwnerId)
+```
+
+**Example - GOOD:**
+```csharp
+var userHasAccess = IsAdmin(user) || IsResourceOwner(user, resource);
+if (userHasAccess)
+```
+
+### **Action on Finding Comments**
+
+When encountering comments during any task:
+1. Delete ALL comments immediately
+2. If comment explains a "hack" or critical "why" - convert to named method/constant
+3. Delete ALL TODO comments without exception
+4. Preserve ONLY `Summary()` blocks in FastEndpoints
+
+### **Comment Purge Procedure**
+
+When performing a comment purge on a microservice:
+1. Search for all `//` comments and delete them
+2. Search for all `/* */` multi-line comments and delete them
+3. Search for all `///` XML documentation and delete them (except inside Summary() methods)
+4. Search for all `#region` and `#endregion` and delete them
+5. Iterate until grep returns 0 results
+6. Build to verify no syntax errors were introduced
+
+---
+
+**Last Updated:** 2026-03-20
+**Status:** Active - Enforced project-wide

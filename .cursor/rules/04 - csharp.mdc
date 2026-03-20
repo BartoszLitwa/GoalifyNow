@@ -1,0 +1,504 @@
+---
+description: C# coding standards and conventions for GoalifyNow microservices using .NET 10 and modern C# features
+globs:
+  - "**/*.cs"
+alwaysApply: false
+---
+
+# C# Coding Standards for GoalifyNow
+
+## Language Features & Syntax
+
+### Primary Constructors (MANDATORY)
+**Always use primary constructors for classes with dependencies:**
+
+```csharp
+// GOOD - Primary constructor (cleaner, preferred)
+public class UserService(
+    AuthDbContext db, 
+    ICurrentContextService context,
+    IPasswordHasher passwordHasher,
+    ILogger<UserService> logger)
+{
+    public async Task<Result<User>> GetUserAsync(Guid id)
+    {
+        return await db.Users.FindAsync(id);
+    }
+}
+
+// BAD - Traditional constructor (avoid)
+public class UserService
+{
+    private readonly AuthDbContext _db;
+    private readonly ICurrentContextService _context;
+    
+    public UserService(AuthDbContext db, ICurrentContextService context)
+    {
+        _db = db;
+        _context = context;
+    }
+}
+```
+
+### Records for DTOs and Events
+```csharp
+// Use records for immutable DTOs
+public record RegisterRequestDto
+{
+    public string Email { get; init; } = string.Empty;
+    public string Password { get; init; } = string.Empty;
+    public string FirstName { get; init; } = string.Empty;
+    public string LastName { get; init; } = string.Empty;
+}
+
+// Use records for domain events
+public record UserRegisteredEvent : IDomainEvent
+{
+    public Guid EventId { get; init; } = Guid.NewGuid();
+    public DateTime OccurredOn { get; init; } = DateTime.UtcNow;
+    public Guid UserId { get; init; }
+    public string Email { get; init; } = string.Empty;
+}
+```
+
+### var vs Explicit Types
+```csharp
+// Use var when type is obvious
+var user = new User();
+var users = await db.Users.ToListAsync();
+var result = CreateUser(dto);
+
+// Use explicit type when not obvious
+IEnumerable<User> GetActiveUsers() => ...;
+User? FindUser(Guid id) => ...;
+```
+
+### Expression-Bodied Members
+```csharp
+// Use => for simple members
+public string FullName => $"{FirstName} {LastName}";
+public bool IsValid => Email is not null && Email.Contains("@");
+
+// Single-statement methods
+public User GetUser(Guid id) => db.Users.Find(id);
+
+// Single-statement properties with get
+public decimal TotalAmount => Items.Sum(i => i.Amount);
+```
+
+---
+
+## Naming Conventions
+
+### PascalCase
+- Classes, structs, interfaces, enums
+- Public methods, properties, events
+- Namespaces
+
+```csharp
+public class UserService { }
+public interface IPasswordHasher { }
+public enum PropertyType { }
+public void RegisterUser() { }
+public string Email { get; set; }
+```
+
+### camelCase
+- Private fields, local variables, parameters
+- Lambda parameters
+
+```csharp
+private readonly AuthDbContext _db;
+private string _email;
+
+public void ProcessUser(string userName)
+{
+    var userEmail = GetEmail(userName);
+}
+
+users.Where(u => u.IsActive).ToList();
+```
+
+### Prefix Interface Names with 'I'
+```csharp
+public interface IUserService { }
+public interface IPasswordHasher { }
+```
+
+---
+
+## Dependency Injection & Extensions
+
+### DependencyInjection.cs Pattern
+Every layer has a `DependencyInjection.cs` file:
+
+```csharp
+namespace GoalifyNow.Auth.Infrastructure;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.AddSoftDeleteInterceptor();
+        services.AddCommonDbContext<AuthDbContext>(configuration);
+        services.AddOutboxDispatcher<AuthDbContext>();
+        services.Configure<StripeOptions>(configuration.GetSection(StripeOptions.SectionName));
+        services.AddScoped<IReplayProtectionService, InMemoryReplayProtectionService>();
+        return services;
+    }
+}
+```
+
+### Common Services Registration
+```csharp
+// In Program.cs
+builder.AddGoalifyNowCommonServices(options =>
+{
+    options.UseCloudIntegration = true;
+    options.UseGrpcServer = true;
+    options.UseMessaging = true;
+    options.UseDomainEventPublishing = true;
+    options.UseSqlDatabase = true;
+    options.UseAzureStorage = true;
+    options.UseApiConfiguration = true;
+    options.UseGrpcAuthValidation = true;
+});
+```
+
+### gRPC Configuration
+```csharp
+// gRPC server
+builder.AddGrpcServer();
+app.MapGrpcService<ClaimsGrpcService>();
+
+// gRPC clients
+builder.Services.AddAuthGrpcClient(builder.Configuration);
+builder.Services.AddGrpcClient<PropertyService.PropertyServiceClient>(Configuration, "Property");
+```
+
+---
+
+## Configuration & Options Pattern
+
+### Options Class with Const SectionName
+```csharp
+public class PasswordHashingOptions
+{
+    public const string SectionName = "PasswordHashing";  // ALWAYS include
+    
+    public int WorkFactor { get; set; } = 12;
+    public bool EnhancedEntropy { get; set; } = true;
+}
+```
+
+### Registration & Usage
+```csharp
+// Register
+services.Configure<PasswordHashingOptions>(
+    configuration.GetSection(PasswordHashingOptions.SectionName)
+);
+
+// Inject and use (IOptions for singleton/simple usage)
+public class UserPasswordService(IOptions<PasswordHashingOptions> options)
+{
+    private readonly PasswordHashingOptions _options = options.Value;
+    
+    public string HashPassword(string password)
+    {
+        return BCrypt.HashPassword(password, _options.WorkFactor);
+    }
+}
+
+// IOptionsMonitor for dynamic config that can change at runtime
+public class DynamicService(IOptionsMonitor<DynamicOptions> options)
+{
+    public void DoSomething()
+    {
+        var current = options.CurrentValue;
+    }
+}
+```
+
+---
+
+## Async/Await Patterns
+
+### Always Async for I/O
+```csharp
+// GOOD - Async for database operations
+public async Task<User?> GetUserAsync(Guid id, CancellationToken ct = default)
+{
+    return await db.Users.FindAsync(id, ct);
+}
+
+// BAD - Sync for database operations
+public User? GetUser(Guid id)
+{
+    return db.Users.Find(id);  // Blocking call
+}
+```
+
+### CancellationToken Parameter
+```csharp
+// Include CancellationToken with default value
+public async Task<Result<User>> RegisterAsync(
+    RegisterRequestDto dto, 
+    CancellationToken cancellationToken = default)
+{
+    var user = User.Create(dto.Email);
+    db.Users.Add(user);
+    await db.SaveChangesAsync(cancellationToken);
+    return Result<User>.Success(user);
+}
+```
+
+### ConfigureAwait
+```csharp
+// In library code, use ConfigureAwait(false)
+public async Task<string> GetDataAsync()
+{
+    var response = await httpClient.GetStringAsync(url).ConfigureAwait(false);
+    return response;
+}
+
+// In application code (ASP.NET Core), ConfigureAwait not needed
+public async Task<IActionResult> GetUser(Guid id)
+{
+    var user = await userService.GetUserAsync(id);
+    return Ok(user);
+}
+```
+
+---
+
+## Error Handling & Validation
+
+### Result Pattern (Preferred)
+```csharp
+public record Result<T>
+{
+    public bool IsSuccess { get; init; }
+    public T? Value { get; init; }
+    public string Error { get; init; } = string.Empty;
+    
+    public static Result<T> Success(T value) => new() { IsSuccess = true, Value = value };
+    public static Result<T> Failure(string error) => new() { IsSuccess = false, Error = error };
+}
+
+// Usage
+public async Task<Result<User>> RegisterAsync(RegisterRequestDto dto)
+{
+    if (await EmailExistsAsync(dto.Email))
+        return Result<User>.Failure("Email already exists");
+    
+    var user = User.Create(dto.Email);
+    await db.SaveChangesAsync();
+    return Result<User>.Success(user);
+}
+```
+
+### FluentValidation
+```csharp
+public class RegisterRequestValidator : AbstractValidator<RegisterRequestDto>
+{
+    public RegisterRequestValidator()
+    {
+        RuleFor(x => x.Email)
+            .NotEmpty().WithMessage("Email is required")
+            .EmailAddress().WithMessage("Email must be valid");
+        
+        RuleFor(x => x.Password)
+            .NotEmpty().WithMessage("Password is required")
+            .MinimumLength(8).WithMessage("Password must be at least 8 characters");
+    }
+}
+```
+
+### gRPC Error Mapping
+```csharp
+public override async Task<GetUserResponse> GetUser(GetUserRequest request, ServerCallContext context)
+{
+    try
+    {
+        var result = await userService.GetUserAsync(Guid.Parse(request.UserId));
+        
+        if (!result.IsSuccess)
+            throw new RpcException(new Status(StatusCode.NotFound, result.Error));
+        
+        return new GetUserResponse { User = MapToProto(result.Value!) };
+    }
+    catch (Exception ex)
+    {
+        throw new RpcException(new Status(StatusCode.Internal, ex.Message));
+    }
+}
+```
+
+---
+
+## LINQ & Collections
+
+### Prefer LINQ Method Syntax
+```csharp
+// GOOD - Method syntax
+var activeUsers = users
+    .Where(u => u.IsActive)
+    .OrderBy(u => u.CreatedAt)
+    .Select(u => new UserDto { Email = u.Email })
+    .ToList();
+
+// ACCEPTABLE - Query syntax for complex joins
+var result = from user in users
+             join role in roles on user.Id equals role.UserId
+             where user.IsActive
+             select new { user, role };
+```
+
+### Avoid Multiple Enumeration
+```csharp
+// BAD - Multiple enumeration
+var users = GetUsers();
+if (users.Any()) { }
+var count = users.Count();  // Enumerates again
+
+// GOOD - Materialize once
+var users = GetUsers().ToList();
+if (users.Any()) { }
+var count = users.Count;  // No re-enumeration
+```
+
+---
+
+## Null Handling
+
+### Nullable Reference Types (Enabled)
+```csharp
+#nullable enable
+
+public class User
+{
+    public string Email { get; set; } = string.Empty;  // Non-nullable, must initialize
+    public string? MiddleName { get; set; }  // Nullable, can be null
+}
+```
+
+### Null-Coalescing & Pattern Matching
+```csharp
+// Null-coalescing
+var name = user.MiddleName ?? "N/A";
+var result = GetUser() ?? throw new InvalidOperationException("User not found");
+
+// Pattern matching
+if (user is null)
+    return NotFound();
+
+if (user is not null && user.IsActive)
+    return Ok(user);
+
+// Null-conditional operator
+var email = user?.Email?.ToLower();
+```
+
+---
+
+## Testing & Quality
+
+### Test Naming Convention
+```
+MethodName_Should_ExpectedBehavior_When_StateUnderTest
+
+Examples:
+- RegisterAsync_ShouldCreateUser_WhenEmailNotTaken
+- GetUserAsync_ShouldReturnNull_WhenUserNotFound
+```
+
+### Shouldly Assertions (Preferred)
+```csharp
+// GOOD - Shouldly
+result.IsSuccess.ShouldBeTrue();
+user.Email.ShouldBe("test@example.com");
+users.Count.ShouldBe(3);
+
+// AVOID - xUnit Assert
+Assert.True(result.IsSuccess);
+Assert.Equal("test@example.com", user.Email);
+```
+
+---
+
+## Documentation & Comments
+
+### XML Documentation for Public APIs
+```csharp
+/// <summary>
+/// Registers a new user with the provided credentials
+/// </summary>
+/// <param name="dto">Registration request containing email and password</param>
+/// <param name="cancellationToken">Cancellation token for async operation</param>
+/// <returns>Result containing the created user or error message</returns>
+public async Task<Result<User>> RegisterAsync(
+    RegisterRequestDto dto, 
+    CancellationToken cancellationToken = default)
+{
+    // Implementation
+}
+```
+
+### Code Comments (When Necessary)
+```csharp
+// GOOD - Explains why, not what
+// Use soft delete to maintain referential integrity for historical data
+user.IsActive = false;
+
+// BAD - Obvious comment
+// Set IsActive to false
+user.IsActive = false;
+```
+
+---
+
+## Project Conventions
+
+### Folder Structure
+```
+GoalifyNow.{ServiceName}/
+├── GoalifyNow.{ServiceName}.API/
+│   ├── Controllers/
+│   ├── Services/
+│   ├── Options/
+│   └── Program.cs
+├── GoalifyNow.{ServiceName}.Application/
+│   ├── Features/{FeatureName}/
+│   │   ├── Commands/
+│   │   ├── Queries/
+│   │   ├── Services/
+│   │   ├── Validators/
+│   │   └── Options/
+│   └── DependencyInjection.cs
+├── GoalifyNow.{ServiceName}.Domain/
+│   ├── Entities/
+│   ├── Events/
+│   ├── ValueObjects/
+│   └── Enums/
+└── GoalifyNow.{ServiceName}.Infrastructure/
+    ├── Persistence/
+    ├── Options/
+    └── DependencyInjection.cs
+```
+
+### Always Use ProjectReference (Never PackageReference for Shared Libraries)
+```xml
+<ItemGroup>
+  <!-- CORRECT -->
+  <ProjectReference Include="..\..\..\shared\GoalifyNow.Common.API\GoalifyNow.Common.API.csproj" />
+  
+  <!-- INCORRECT -->
+  <PackageReference Include="GoalifyNow.Common.API" Version="1.0.0" />
+</ItemGroup>
+```
+
+---
+
+**For detailed patterns, see architecture-specific cursor rules.** 

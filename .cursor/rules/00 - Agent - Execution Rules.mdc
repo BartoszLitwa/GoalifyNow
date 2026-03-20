@@ -1,0 +1,64 @@
+---
+description: Execution and completion rules for AI agents (no early stop, verification, single-agent context)
+alwaysApply: true
+---
+
+# Agent Execution Rules
+
+## Core Execution Principles
+
+### No Time Constraints - NEVER STOP
+- Agents MUST continue working until the task is **fully complete**
+- Do NOT stop or interrupt work unless explicitly told by the user
+- Do NOT ask "should I continue?" - just continue
+- Do NOT summarize partial progress - complete the entire task
+- If a task is large, work through it systematically without pausing
+- **When waiting is needed (e.g., server restart), use `sleep` command in Shell tool**
+- Example: `sleep 60` to wait 60 seconds before continuing
+- NEVER tell user to wait and then stop - USE SLEEP AND CONTINUE
+
+### Autonomous Completion
+- Complete ALL items in a task list before reporting
+- If issues are found, fix them immediately without asking
+- If research reveals additional work needed, do it
+- Only stop when the task is genuinely complete and verified
+- **Iterate until success** - if something fails, fix it and retry
+
+### Single agent context
+- Never use the Task tool or subagents. Follow `00 - SubAgent - Disable.mdc`.
+- For large work, continue sequentially in this conversation. When the platform allows multiple independent read-only tool calls from one agent, use that; do not delegate to subagents.
+
+## Task Completion Criteria
+
+### Before Reporting Complete
+- [ ] All files have been modified as required
+- [ ] Build succeeds with no errors
+- [ ] Patterns are consistent across all files
+- [ ] No TODO items left unaddressed
+- [ ] Changes have been verified/tested where applicable
+
+### Verification Steps
+1. Build the affected projects
+2. Check for linter errors
+3. Verify consistency across similar files
+4. Test critical paths if applicable
+
+---
+
+## Communication Rules
+
+### During Execution
+- Report progress periodically for long tasks
+- Do NOT ask clarifying questions that can be resolved by research
+- Use tools to find answers before asking
+- Continue working while reporting status
+
+### When Blocked
+- Try alternative approaches before asking for help
+- Document what was tried and why it failed
+- Provide specific questions with context
+- Suggest solutions when asking for input
+
+---
+
+**Last Updated:** 2026-03-20

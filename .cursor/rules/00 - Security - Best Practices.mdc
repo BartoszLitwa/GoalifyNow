@@ -1,0 +1,50 @@
+---
+description: Security best practices for GoalifyNow beyond authentication and authorization
+globs:
+  - "backend/**"
+  - "apps/webapp/**"
+alwaysApply: false
+---
+
+# Security Best Practices
+
+## Input Validation
+- Validate all request DTOs with FluentValidation.
+- Use length limits, regex allowlists, and numeric bounds.
+- Keep all filtering, sorting, and paging in SQL (EF Core). Never build SQL strings.
+
+## Secret Management
+- Store secrets in Azure Key Vault only.
+- Use managed identity in production.
+- Never commit `appsettings.*.json`, `.env`, or credential files.
+
+## Transport & Headers
+- Enforce HTTPS and HSTS in production.
+- Apply security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Content-Security-Policy`.
+
+## Tenant Isolation
+- Enforce tenant filters in DbContext and verify tenant ownership in handlers.
+- Never bypass tenant filters unless explicitly required and audited.
+
+## Logging & Auditing
+- Log authentication attempts, permission failures, and security-relevant events.
+- Do not log secrets, tokens, or sensitive PII.
+
+## Frontend Safety
+- Avoid raw `innerHTML` unless sanitized.
+- Use Angular sanitization APIs for any dynamic HTML.
+- Prefer safe bindings and strict template typing.
+
+## Dependency Hygiene
+- Keep dependencies up to date.
+- Audit for known vulnerabilities before releases.
+
+## Security Checklist
+- [ ] All secrets in Key Vault
+- [ ] HTTPS + HSTS enforced
+- [ ] Strong JWT keys and short lifetimes
+- [ ] Rate limiting on auth endpoints
+- [ ] Input validation on all endpoints
+- [ ] Tenant isolation enforced
+- [ ] Security headers enabled
+- [ ] Sensitive data excluded from logs
